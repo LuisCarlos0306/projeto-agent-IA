@@ -1,0 +1,244 @@
+name: CI e versionamento
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: SHA completo já integrado na main
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_SHA: ${{ inputs.release_sha || github.sha }}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    name: Validar código
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agent_ia
+          POSTGRES_PASSWORD: agent_ia
+          POSTGRES_DB: agent_ia
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent_ia -d agent_ia"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      POSTGRES_DSN: postgresql+psycopg://agent_ia:agent_ia@127.0.0.1:5432/agent_ia
+      REDIS_URL: redis://127.0.0.1:6379/1
+      GEMINI_API_KEY: test-only
+      GEMINI_MODEL: gemini-2.5-flash
+      SSH_STRICT_HOST_KEY_CHECKING: "true"
+
+    steps:
+      - name: Validar SHA solicitado para release
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          MAIN_SHA="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/main | awk '{print $1}')"
+          if [ "$RELEASE_SHA" != "$MAIN_SHA" ]; then
+            echo "::error::O SHA solicitado não é o HEAD atual da main."
+            exit 1
+          fi
+
+      - name: Baixar código
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+          pip check
+
+      - name: Validar sintaxe
+        run: python -m compileall -q app tests labs
+
+      - name: Validar playbooks e cenários
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          files = sorted(Path('config/playbooks').glob('*.yml')) + sorted(Path('labs/scenarios').glob('*.yml'))
+          assert files, 'nenhum playbook ou cenário encontrado'
+          for path in files:
+              value = yaml.safe_load(path.read_text(encoding='utf-8'))
+              assert isinstance(value, dict), f'{path}: YAML deve ser um objeto'
+          print(f'{len(files)} arquivos YAML validados')
+          PY
+
+      - name: Validar inicialização do CLI
+        run: agent --help >/dev/null
+
+      - name: Validar artefatos de deploy
+        run: |
+          bash -n deploy/scripts/deploy_release.sh
+          bash deploy/scripts/deploy_release.sh --help >/dev/null
+          bash -n deploy/scripts/bootstrap_opencode.sh
+
+      - name: Executar testes
+        run: pytest -q --junitxml=pytest-results.xml
+
+      - name: Publicar relatório dos testes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: pytest-results.xml
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Validar versão SemVer e tag inédita
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          VERSION="$(python - <<'PY'
+          import tomllib
+          with open('pyproject.toml', 'rb') as file:
+              print(tomllib.load(file)['project']['version'])
+          PY
+          )"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::A versão $VERSION não segue MAJOR.MINOR.PATCH."
+            exit 1
+          fi
+          git fetch --tags --force
+          if git rev-parse "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "::error::A tag v$VERSION já existe. Atualize a versão no pyproject.toml."
+            exit 1
+          fi
+          echo "Versão validada: v$VERSION"
+
+  tag:
+    name: Criar tag da versão
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch'
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Baixar código e tags
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Criar ou validar tag
+        shell: bash
+        run: |
+          VERSION="$(python - <<'PY'
+          import tomllib
+          with open('pyproject.toml', 'rb') as file:
+              print(tomllib.load(file)['project']['version'])
+          PY
+          )"
+          TAG="v$VERSION"
+          git fetch --tags --force
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            TAG_SHA="$(git rev-list -n 1 "$TAG")"
+            if [ "$TAG_SHA" = "$RELEASE_SHA" ]; then
+              echo "A tag $TAG já aponta para a release aprovada; continuando."
+              exit 0
+            fi
+            echo "::error::A tag $TAG já existe e aponta para $TAG_SHA, não para $RELEASE_SHA."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+  deploy:
+    name: Deploy produção
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch'
+    needs:
+      - validate
+      - tag
+    runs-on: [self-hosted, Linux, X64, agent-ia-prod]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    environment:
+      name: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Baixar exatamente o commit validado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Preparar, validar e ativar release
+        env:
+          AGENT_DEPLOY_APPROVED_SHA: ${{ env.RELEASE_SHA }}
+          AGENT_RELEASE_SHA: ${{ env.RELEASE_SHA }}
+        run: bash deploy/scripts/deploy_release.sh --activate
+
+      - name: Instalar e configurar OpenCode integrado
+        env:
+          AGENT_APP_ROOT: /home/jose/agent-ia-production/current
+          AGENT_ENV_FILE: /home/jose/.config/agent-ia/production.env
+          AGENT_VENV: /home/jose/agent-ia-production/current/.venv
+          AGENT_HEALTH_URL: http://127.0.0.1:8080/health
+        run: bash deploy/scripts/bootstrap_opencode.sh

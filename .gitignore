@@ -1,0 +1,54 @@
+# ==================================================
+# Segredos e variáveis de ambiente
+# ==================================================
+.env
+.env.*
+!.env.example
+
+**/.env
+**/.env.*
+!**/.env.example
+
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ==================================================
+# Python
+# ==================================================
+__pycache__/
+*.py[cod]
+*$py.class
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+.coverage
+coverage.xml
+htmlcov/
+
+venv/
+.venv/
+
+*.egg-info/
+dist/
+build/
+
+# ==================================================
+# Arquivos de execução
+# ==================================================
+*.log
+*.pid
+*.db
+*.sqlite
+*.sqlite3
+
+# ==================================================
+# Editores e sistema operacional
+# ==================================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
