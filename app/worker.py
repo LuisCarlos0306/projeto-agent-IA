@@ -12,6 +12,7 @@ from app.db.base import ensure_database_schema
 from app.services.ai_instrumentation import install_ai_instrumentation
 from app.services.focused_validation import install_focused_validation
 from app.services.hard_job_alarm import install_hard_job_alarm
+from app.services.job_process_guard import install_job_process_guard
 from app.services.operational_tool_instrumentation import install_operational_tools
 from app.services.ptbr_guard import install_ptbr_guard
 from app.services.worker_cancel_watchdog import _hard_timeout_seconds, install_worker_cancel_watchdog
@@ -25,6 +26,7 @@ install_ptbr_guard()
 install_operational_tools()
 install_worker_cancel_watchdog()
 install_hard_job_alarm()
+install_job_process_guard()
 app = typer.Typer(no_args_is_help=True)
 console = Console()
 
@@ -49,7 +51,8 @@ def run(
         f"Coleta focada: {focused}\n"
         f"Idioma das mensagens: pt-BR\n"
         f"Cancelamento forçado: {cancel_grace}s\n"
-        f"Timeout duro por job: {hard_timeout}s",
+        f"Timeout duro por job: {hard_timeout}s\n"
+        f"Isolamento por processo: ativo",
         title="Agent IA Worker",
     ))
     if once:
