@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import typer
 from rich.console import Console
@@ -30,13 +31,14 @@ def run(
     """Executa jobs da fila Redis usando a conectividade deste worker."""
     settings = get_settings()
     ensure_database_schema()
+    focused = os.getenv("AGENT_FAST_VALIDATION_ENABLED", "true").strip().lower()
     console.print(Panel(
         f"Worker: {settings.agent_worker_name}\n"
         f"Fila: {settings.agent_queue_name}\n"
         f"Redis: configurado\n"
         f"Segredos: {secret_backend_status(settings).get('backend')}\n"
         f"StrictHostKeyChecking: {settings.ssh_strict_host_key_checking}\n"
-        f"Coleta focada: {str(__import__('os').getenv('AGENT_FAST_VALIDATION_ENABLED', 'true')).lower()}",
+        f"Coleta focada: {focused}",
         title="Agent IA Worker",
     ))
     if once:
