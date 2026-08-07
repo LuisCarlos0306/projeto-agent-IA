@@ -8,7 +8,6 @@ on:
       - completed
 
 permissions:
-  actions: write
   contents: write
   pull-requests: write
 
@@ -20,7 +19,6 @@ jobs:
   merge:
     name: Integrar PR aprovado
     if: >-
-      github.event.workflow_run.workflow_id == 319667928 &&
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
@@ -30,14 +28,13 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ -z "$PR_NUMBER" ]; then
-            echo "Nenhum pull request associado à execução $RUN_ID."
+          if [ -z "${PR_NUMBER:-}" ]; then
+            echo "Nenhum pull request associado à execução."
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -49,39 +46,26 @@ jobs:
           HEAD_REPOSITORY="$(jq -r '.head.repo.full_name // empty' <<< "$PR_DATA")"
           IS_DRAFT="$(jq -r '.draft' <<< "$PR_DATA")"
           STATE="$(jq -r '.state' <<< "$PR_DATA")"
-          LABELS="$(jq -r '[.labels[].name] | join(",")' <<< "$PR_DATA")"
 
-          echo "Pull request: #$PR_NUMBER"
-          echo "Origem: $HEAD_REPOSITORY:$HEAD_REF"
-          echo "Destino: $BASE_REF"
-          echo "Labels: ${LABELS:-nenhuma}"
-
-          if [ "$STATE" != "open" ]; then
-            echo "PR não está aberto; nenhuma ação necessária."
-            echo "eligible=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ "$BASE_REF" != "main" ]; then
-            echo "PR não aponta para a main; merge automático ignorado."
+          if [ "$STATE" != "open" ] || [ "$BASE_REF" != "main" ]; then
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if [ "$HEAD_REPOSITORY" != "$GITHUB_REPOSITORY" ]; then
-            echo "PR originado de outro repositório; revisão manual obrigatória."
+            echo "PR externo exige revisão manual."
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if [ "$IS_DRAFT" = "true" ]; then
-            echo "PR está em rascunho; merge automático ignorado."
+            echo "PR em rascunho não será integrado."
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if jq -e '.labels | any(.name == "manual-review")' <<< "$PR_DATA" >/dev/null; then
-            echo "Label manual-review encontrada; merge automático bloqueado."
+            echo "Label manual-review bloqueou o merge automático."
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -92,7 +76,6 @@ jobs:
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Fazer merge por squash
-        id: merge
         if: steps.pr.outputs.eligible == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -101,52 +84,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          for attempt in 1 2 3; do
-            if MERGE_RESPONSE="$(gh api \
-              --method PUT \
-              "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/merge" \
-              -f merge_method=squash \
-              -f sha="$HEAD_SHA")"; then
-              if jq -e '.merged == true' <<< "$MERGE_RESPONSE" >/dev/null; then
-                MERGE_SHA="$(jq -r '.sha' <<< "$MERGE_RESPONSE")"
-                jq -r '.message' <<< "$MERGE_RESPONSE"
-                echo "sha=$MERGE_SHA" >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
-              jq -r '.message' <<< "$MERGE_RESPONSE" >&2
-            fi
-
-            if [ "$attempt" -eq 3 ]; then
-              echo "::error::Não foi possível integrar o PR #$PR_NUMBER após o CI aprovado."
-              exit 1
-            fi
-
-            sleep 5
-          done
-
-      - name: Disparar CI, tag e deploy da main
-        if: steps.pr.outputs.eligible == 'true' && steps.merge.outputs.sha != ''
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MERGE_SHA: ${{ steps.merge.outputs.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          for attempt in 1 2 3; do
-            MAIN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
-            if [ "$MAIN_SHA" = "$MERGE_SHA" ]; then
-              gh workflow run ci-release.yml \
-                --ref main \
-                -f release_sha="$MERGE_SHA"
-              exit 0
-            fi
-            sleep 2
-          done
-
-          echo "::error::A main não aponta para o SHA integrado $MERGE_SHA."
-          exit 1
+          gh api \
+            --method PUT \
+            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/merge" \
+            -f merge_method=squash \
+            -f sha="$HEAD_SHA" \
+            --jq '.message'
 
       - name: Remover branch integrada
         if: steps.pr.outputs.eligible == 'true'
