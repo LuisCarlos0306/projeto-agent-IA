@@ -1,0 +1,41 @@
+.execution-progress-bar > i,
+.execution-tray-progress > i {
+  transition: width .28s ease, background .28s ease, box-shadow .28s ease;
+}
+
+.execution-progress-summary[data-status="completed"] .execution-progress-bar > i,
+.execution-tray[data-status="completed"] .execution-tray-progress > i {
+  background: linear-gradient(90deg, #22c55e, #55d69e) !important;
+  box-shadow: 0 0 14px rgba(85, 214, 158, .28);
+}
+
+.execution-progress-summary[data-status="completed"] .execution-progress-title > b,
+.execution-tray[data-status="completed"] .execution-tray-percent {
+  color: #55d69e !important;
+}
+
+.execution-progress-summary[data-status="failed"] .execution-progress-bar > i,
+.execution-tray[data-status="failed"] .execution-tray-progress > i {
+  background: linear-gradient(90deg, #ef4444, #ff7589) !important;
+  box-shadow: 0 0 14px rgba(255, 117, 137, .28);
+}
+
+.execution-progress-summary[data-status="failed"] .execution-progress-title > b,
+.execution-tray[data-status="failed"] .execution-tray-percent {
+  color: #ff7589 !important;
+}
+
+.execution-progress-summary[data-status="cancelled"] .execution-progress-bar > i,
+.execution-progress-summary[data-status="cancelling"] .execution-progress-bar > i,
+.execution-tray[data-status="cancelled"] .execution-tray-progress > i,
+.execution-tray[data-status="cancelling"] .execution-tray-progress > i {
+  background: linear-gradient(90deg, #f59e0b, #ffc96b) !important;
+  box-shadow: 0 0 14px rgba(255, 201, 107, .24);
+}
+
+.execution-progress-summary[data-status="cancelled"] .execution-progress-title > b,
+.execution-progress-summary[data-status="cancelling"] .execution-progress-title > b,
+.execution-tray[data-status="cancelled"] .execution-tray-percent,
+.execution-tray[data-status="cancelling"] .execution-tray-percent {
+  color: #ffc96b !important;
+}
