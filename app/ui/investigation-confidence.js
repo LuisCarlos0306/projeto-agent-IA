@@ -51,7 +51,31 @@
     observer.observe(tableBody, { childList: true, subtree: true });
   }
 
+  function installCyberBrand() {
+    const mark = document.querySelector(".brand-mark");
+    if (!mark || mark.querySelector(".brand-ai-logo")) return;
+    mark.setAttribute("title", "Agent IA — inteligência operacional");
+    mark.innerHTML = `
+      <svg class="brand-ai-logo" viewBox="0 0 48 48" role="img" aria-label="Símbolo neural do Agent IA">
+        <defs>
+          <linearGradient id="brandCyberGradient" x1="7" y1="7" x2="41" y2="41" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#45efff"/>
+            <stop offset=".52" stop-color="#35dfff"/>
+            <stop offset="1" stop-color="#b03cff"/>
+          </linearGradient>
+        </defs>
+        <path class="brand-head" d="M13 38V22c0-8 5.2-13 12.8-13 6.5 0 11.5 3.9 12.5 10l3.2 6.3-4.5 2.1V35h-8.5l-4.8 4.8H13z"/>
+        <path class="brand-trace" d="M18 31V20h6v-5M24 34V25h8v-8M17 25h4l3-3M29 29v-5h6M19 35h5l4-4"/>
+        <circle class="brand-node" cx="18" cy="20" r="1.6"/>
+        <circle class="brand-node" cx="24" cy="15" r="1.6"/>
+        <circle class="brand-node" cx="32" cy="17" r="1.6"/>
+        <circle class="brand-node" cx="35" cy="24" r="1.6"/>
+        <circle class="brand-node" cx="29" cy="29" r="1.6"/>
+      </svg>`;
+  }
+
   function bootConfidenceMeters() {
+    installCyberBrand();
     observeTable("#recent-investigations", 3);
     observeTable("#investigations-table", 5);
     decorateAll();
