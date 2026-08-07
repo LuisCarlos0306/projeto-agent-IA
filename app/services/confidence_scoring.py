@@ -49,23 +49,35 @@ def validated_confidence(
 ) -> tuple[int, dict[str, Any]]:
     """Calcula confiança validada usando raciocínio da IA e cobertura factual.
 
-    A confiança cognitiva é ponderada pela evidência executada. Uma IA muito
-    confiante sem evidência permanece na faixa baixa. Quando a IA retorna zero,
-    evidências reais ainda podem produzir um valor útil. A crítica independente
-    continua podendo limitar o resultado final.
+    O cálculo é idempotente: quando uma investigação já possui a base validada,
+    reutiliza a confiança original da IA em vez de tratar o percentual validado
+    como uma nova resposta cognitiva e recalculá-lo em cascata.
     """
     analysis = dict(analysis or {})
     evidence = list(evidence or [])
     assessments = list(assessments or [])
     normalized_status = str(status or analysis.get("status") or "inconclusive").strip().casefold()
 
-    ai_confidence = _percent(analysis.get("confidence"))
+    previous_basis = (
+        dict(analysis.get("validated_confidence_basis") or {})
+        if isinstance(analysis.get("validated_confidence_basis"), dict)
+        else {}
+    )
+    ai_confidence = _percent(
+        previous_basis.get("ai_confidence")
+        if "ai_confidence" in previous_basis
+        else analysis.get("confidence")
+    )
     assessment_confidences = [
         _percent(item.get("confidence"))
         for item in assessments
         if isinstance(item, dict) and _percent(item.get("confidence")) > 0
     ]
-    round_confidence = assessment_confidences[-1] if assessment_confidences else 0
+    round_confidence = (
+        _percent(previous_basis.get("round_confidence"))
+        if "round_confidence" in previous_basis
+        else (assessment_confidences[-1] if assessment_confidences else 0)
+    )
     cognitive_confidence = max(ai_confidence, round_confidence)
     factual_confidence = evidence_confidence(evidence)
 
@@ -74,7 +86,6 @@ def validated_confidence(
     elif factual_confidence > 0:
         score = factual_confidence
     elif cognitive_confidence > 0:
-        # Sem evidência, a confiança da IA ainda é informativa, mas não validada.
         score = min(cognitive_confidence, 39)
     else:
         score = 0
