@@ -7,20 +7,28 @@ ROOT = Path(__file__).resolve().parents[1]
 UI = ROOT / "app" / "ui"
 
 
-def test_dashboard_loads_confidence_assets_directly() -> None:
+def test_dashboard_loads_current_assets_directly() -> None:
     html = (UI / "index.html").read_text(encoding="utf-8")
 
-    assert '/ui/assets/investigation-confidence.css?v=1.30.9' in html
-    assert '/ui/assets/investigation-confidence.js?v=1.30.9' in html
-    assert '/ui/assets/product-polish.js?v=1.30.9' in html
+    assert '<meta name="agent-ui-version" content="1.30.13">' in html
+    assert 'data-agent-ui-version="1.30.13"' in html
+    assert '/ui/assets/fast-validation-ui.css?v=1.30.13' in html
+    assert '/ui/assets/investigation-confidence.css?v=1.30.13' in html
+    assert '/ui/assets/cyber-theme.css?v=1.30.13' in html
+    assert '/ui/assets/fast-validation-ui.js?v=1.30.13' in html
+    assert '/ui/assets/investigation-confidence.js?v=1.30.13' in html
+    assert '/ui/assets/product-polish.js?v=1.30.13' in html
+    assert 'class="brand-ai-logo"' in html
+    assert '<div class="brand-mark" aria-hidden="true">AI</div>' not in html
 
 
 def test_datastore_monitor_cache_version_is_current() -> None:
     script = (UI / "product-polish.js").read_text(encoding="utf-8")
 
-    assert '/ui/assets/datastore-monitor.css?v=1.30.9' in script
-    assert '/ui/assets/datastore-monitor.js?v=1.30.9' in script
+    assert '/ui/assets/datastore-monitor.css?v=1.30.13' in script
+    assert '/ui/assets/datastore-monitor.js?v=1.30.13' in script
     assert 'datastore-monitor.js?v=1.30.4' not in script
+    assert 'datastore-monitor.js?v=1.30.9' not in script
 
 
 def test_resource_history_is_hidden_and_confidence_meter_is_available() -> None:

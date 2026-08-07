@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
+  <meta name="agent-ui-version" content="1.30.13">
   <title>Agent IA Infra</title>
   <link rel="stylesheet" href="/ui/assets/styles.css?v=1.21.2">
   <link rel="stylesheet" href="/ui/assets/enhancements.css?v=1.21.2">
@@ -15,12 +16,34 @@
   <link rel="stylesheet" href="/ui/assets/product-polish.css?v=1.21.2">
   <link rel="stylesheet" href="/ui/assets/investigation-flow.css?v=1.21.2">
   <link rel="stylesheet" href="/ui/assets/execution-live.css?v=1.21.2">
-  <link rel="stylesheet" href="/ui/assets/investigation-confidence.css?v=1.30.9">
+  <link rel="stylesheet" href="/ui/assets/fast-validation-ui.css?v=1.30.13">
+  <link rel="stylesheet" href="/ui/assets/investigation-confidence.css?v=1.30.13">
+  <link rel="stylesheet" href="/ui/assets/cyber-theme.css?v=1.30.13">
 </head>
-<body>
+<body data-agent-ui-version="1.30.13">
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand"><div class="brand-mark" aria-hidden="true">AI</div><div><strong>Agent IA</strong><span>Infra Operations</span></div></div>
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true" title="Agent IA — inteligência operacional">
+          <svg class="brand-ai-logo" viewBox="0 0 48 48" role="img" aria-label="Símbolo neural do Agent IA">
+            <defs>
+              <linearGradient id="brandCyberGradientStatic" x1="7" y1="7" x2="41" y2="41" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#45efff"/>
+                <stop offset=".52" stop-color="#35dfff"/>
+                <stop offset="1" stop-color="#b03cff"/>
+              </linearGradient>
+            </defs>
+            <path class="brand-head" d="M13 38V22c0-8 5.2-13 12.8-13 6.5 0 11.5 3.9 12.5 10l3.2 6.3-4.5 2.1V35h-8.5l-4.8 4.8H13z"/>
+            <path class="brand-trace" d="M18 31V20h6v-5M24 34V25h8v-8M17 25h4l3-3M29 29v-5h6M19 35h5l4-4"/>
+            <circle class="brand-node" cx="18" cy="20" r="1.6"/>
+            <circle class="brand-node" cx="24" cy="15" r="1.6"/>
+            <circle class="brand-node" cx="32" cy="17" r="1.6"/>
+            <circle class="brand-node" cx="35" cy="24" r="1.6"/>
+            <circle class="brand-node" cx="29" cy="29" r="1.6"/>
+          </svg>
+        </div>
+        <div><strong>Agent IA</strong><span>Infra Operations</span></div>
+      </div>
       <nav class="nav" aria-label="Navegação principal">
         <button class="nav-item active" data-view="dashboard"><span class="nav-icon">⌂</span><span>Visão geral</span></button>
         <button class="nav-item" data-view="investigations"><span class="nav-icon">◎</span><span>Investigações</span></button>
@@ -139,10 +162,11 @@
   <script src="/ui/assets/settings.js?v=1.21.2" defer></script>
   <script src="/ui/assets/ux-improvements.js?v=1.21.2" defer></script>
   <script src="/ui/assets/execution-tracker.js?v=1.21.2" defer></script>
-  <script src="/ui/assets/product-polish.js?v=1.30.9" defer></script>
+  <script src="/ui/assets/product-polish.js?v=1.30.13" defer></script>
   <script src="/ui/assets/investigation-flow.js?v=1.21.2" defer></script>
   <script src="/ui/assets/correction-flow.js?v=1.21.2" defer></script>
   <script src="/ui/assets/recovery-flow.js?v=1.29.0" defer></script>
-  <script src="/ui/assets/investigation-confidence.js?v=1.30.9" defer></script>
+  <script src="/ui/assets/fast-validation-ui.js?v=1.30.13" defer></script>
+  <script src="/ui/assets/investigation-confidence.js?v=1.30.13" defer></script>
 </body>
 </html>
