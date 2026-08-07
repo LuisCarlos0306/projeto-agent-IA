@@ -39,6 +39,35 @@ def _persist_validated_analysis(investigation_id: str, analysis: dict[str, Any])
         return True
 
 
+def _apply_to_result(result: dict[str, Any]) -> dict[str, Any]:
+    analysis = dict(result.get("analysis") or {})
+    status = str(analysis.get("status") or result.get("status") or "inconclusive")
+    confidence, basis = validated_confidence(
+        status=status,
+        analysis=analysis,
+        evidence=list(result.get("evidence") or []),
+        assessments=list(result.get("round_assessments") or result.get("assessments") or []),
+    )
+    analysis["confidence"] = confidence
+    analysis["validated_confidence_basis"] = basis
+    result["analysis"] = analysis
+    result["status"] = status
+    result["confidence"] = confidence
+    investigation_id = result.get("investigation_id")
+    if investigation_id:
+        _persist_validated_analysis(str(investigation_id), analysis)
+    return result
+
+
+def _wrap_run(run_fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+    @wraps(run_fn)
+    def wrapped(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return _apply_to_result(run_fn(*args, **kwargs))
+
+    setattr(wrapped, "__agent_confidence_run__", True)
+    return wrapped
+
+
 def _wrap_save(save_fn: Callable[..., str]) -> Callable[..., str]:
     @wraps(save_fn)
     def wrapped(*args: Any, **kwargs: Any) -> str:
@@ -76,12 +105,12 @@ def _wrap_update(update_fn: Callable[[str, dict[str, Any]], bool]) -> Callable[[
 
 
 def install_confidence_instrumentation() -> None:
-    """Mantém a confiança do resultado, histórico e análise sempre sincronizada."""
+    """Mantém resultado, histórico e análise com a mesma confiança validada."""
     global _INSTALLED
     if _INSTALLED:
         return
 
-    from app.services import dynamic_agent, intelligent_agent
+    from app.services import dynamic_agent, intelligent_agent, runner
 
     if not getattr(dynamic_agent.save_investigation, "__agent_confidence_save__", False):
         dynamic_agent.save_investigation = _wrap_save(dynamic_agent.save_investigation)
@@ -90,8 +119,9 @@ def install_confidence_instrumentation() -> None:
     if not getattr(original_update, "__agent_confidence_update__", False):
         wrapped_update = _wrap_update(original_update)
         intelligent_agent.update_investigation_analysis = wrapped_update
-        # dynamic_agent importou a mesma função diretamente; atualize também a
-        # referência local para aprovações e atualizações posteriores.
         dynamic_agent.update_investigation_analysis = wrapped_update
+
+    if not getattr(runner.run_dynamic_investigation, "__agent_confidence_run__", False):
+        runner.run_dynamic_investigation = _wrap_run(runner.run_dynamic_investigation)
 
     _INSTALLED = True
