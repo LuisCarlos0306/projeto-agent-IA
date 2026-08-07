@@ -67,8 +67,8 @@ def test_installer_enables_opencode_and_supports_nvm() -> None:
     assert "npm prefix -g" in deploy_bootstrap
     assert '"OPENCODE_ENABLED": "true"' in deploy_bootstrap
     assert "systemctl --user restart agent-ia-api.service" in deploy_bootstrap
-    assert "Instalar e configurar OpenCode integrado" in workflow
-    assert "bootstrap_opencode.sh" in workflow
+    assert "Instalar e configurar OpenCode integrado" not in workflow
+    assert "bash -n deploy/scripts/bootstrap_opencode.sh" in workflow
 
 
 def test_install_scripts_have_valid_bash_syntax() -> None:
