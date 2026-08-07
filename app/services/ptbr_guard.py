@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
-from app.services import dynamic_agent, intelligent_agent, result_presentation
+from app.services import dynamic_agent, intelligent_agent, persistence, result_presentation
 
 
 _INSTALLED = False
@@ -36,6 +36,9 @@ _USER_TEXT_FIELDS = {
     "round_summary",
     "reasoning_summary",
     "detail",
+    "description",
+    "evidence_reason",
+    "recommendation",
 }
 _PRESERVE_FIELDS = {
     "command",
@@ -147,6 +150,20 @@ def ensure_ptbr_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
     return output
 
 
+def ensure_ptbr_result(result: dict[str, Any]) -> dict[str, Any]:
+    output = dict(result)
+    analysis = ensure_ptbr_analysis(dict(output.get("analysis") or {}))
+    analysis["ticket_report"] = result_presentation.build_ticket_report_ptbr(analysis)
+    output["analysis"] = analysis
+    if isinstance(output.get("review"), dict):
+        output["review"] = _sanitize_value(dict(output["review"]), "review")
+    if isinstance(output.get("corrections"), list):
+        output["corrections"] = _sanitize_value(list(output["corrections"]), "corrections")
+    output["status"] = analysis.get("status") or output.get("status")
+    output["confidence"] = analysis.get("confidence") if analysis.get("confidence") is not None else output.get("confidence")
+    return output
+
+
 def _wrap_reasoning(base: Callable[..., Any]) -> Callable[..., Any]:
     def wrapped(prompt: str, purpose: str, provider_name: str | None = None):
         if _LANGUAGE_DIRECTIVE not in prompt:
@@ -174,20 +191,23 @@ def _localize_without_external_ai(
 
 def _wrap_finalizer(base: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
     def wrapped(result: dict[str, Any], *, settings=None) -> dict[str, Any]:
-        finalized = base(result, settings=settings)
-        analysis = ensure_ptbr_analysis(dict(finalized.get("analysis") or {}))
-        analysis["ticket_report"] = result_presentation.build_ticket_report_ptbr(analysis)
-        finalized["analysis"] = analysis
-        finalized["status"] = analysis.get("status")
-        finalized["confidence"] = analysis.get("confidence")
-        result_presentation._sync_investigation(finalized, analysis)
+        finalized = ensure_ptbr_result(base(result, settings=settings))
+        result_presentation._sync_investigation(finalized, finalized["analysis"])
         return finalized
 
     return wrapped
 
 
+def _wrap_history_reader(base: Callable[..., dict[str, Any] | None]) -> Callable[..., dict[str, Any] | None]:
+    def wrapped(*args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        result = base(*args, **kwargs)
+        return ensure_ptbr_result(result) if isinstance(result, dict) else result
+
+    return wrapped
+
+
 def install_ptbr_guard() -> None:
-    """Força pt-BR nos prompts e aplica fallback determinístico em mensagens finais."""
+    """Força pt-BR nos prompts, resultados atuais e histórico exibido ao operador."""
     global _INSTALLED
     if _INSTALLED:
         return
@@ -200,4 +220,5 @@ def install_ptbr_guard() -> None:
     result_presentation.finalize_result_presentation = _wrap_finalizer(
         result_presentation.finalize_result_presentation
     )
+    persistence.get_investigation = _wrap_history_reader(persistence.get_investigation)
     _INSTALLED = True
