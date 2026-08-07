@@ -19,7 +19,7 @@
       `<i class="${index < active ? "active" : ""}" aria-hidden="true"></i>`
     )).join("");
     const label = score >= 70 ? "Alta" : score >= 40 ? "Média" : "Baixa";
-    return `<div class="investigation-confidence-meter" data-level="${level}" title="Confiança ${label}: ${score}%" aria-label="Confiança ${label}: ${score}%">
+    return `<div class="investigation-confidence-meter" data-level="${level}" data-score="${score}" title="Confiança ${label}: ${score}%" aria-label="Confiança ${label}: ${score}%">
       <span class="investigation-confidence-segments">${segments}</span>
       <strong>${score}%</strong>
     </div>`;
@@ -29,17 +29,21 @@
     if (!tableBody) return;
     tableBody.querySelectorAll("tr").forEach((row) => {
       const cell = row.children[columnIndex];
-      if (!cell || cell.querySelector(".investigation-confidence-meter")) return;
+      if (!cell) return;
       const match = String(cell.textContent || "").match(/(-?\d+(?:[.,]\d+)?)\s*%/);
       if (!match) return;
-      const value = Number(match[1].replace(",", "."));
+      const value = clampConfidence(Number(match[1].replace(",", ".")));
+      const current = cell.querySelector(".investigation-confidence-meter");
+      if (current && Number(current.dataset.score) === value) return;
       cell.classList.add("investigation-confidence-cell");
       cell.innerHTML = confidenceMarkup(value);
     });
   }
 
   function decorateAll() {
+    // Dashboard: coluna Confiança das investigações recentes.
     decorateRows(document.querySelector("#recent-investigations"), 3);
+    // Histórico completo: coluna Confiança de todas as investigações.
     decorateRows(document.querySelector("#investigations-table"), 5);
   }
 
@@ -48,7 +52,7 @@
     if (!tableBody) return;
     decorateRows(tableBody, columnIndex);
     const observer = new MutationObserver(() => decorateRows(tableBody, columnIndex));
-    observer.observe(tableBody, { childList: true, subtree: true });
+    observer.observe(tableBody, { childList: true, subtree: true, characterData: true });
   }
 
   function installCyberBrand() {
