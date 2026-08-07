@@ -12,6 +12,7 @@ from app.db.base import ensure_database_schema
 from app.services.ai_instrumentation import install_ai_instrumentation
 from app.services.focused_validation import install_focused_validation
 from app.services.operational_tool_instrumentation import install_operational_tools
+from app.services.ptbr_guard import install_ptbr_guard
 from app.services.worker_cancel_watchdog import install_worker_cancel_watchdog
 from app.services.jobs import get_job, run_worker_once, worker_loop
 from app.services.secrets import secret_backend_status
@@ -19,6 +20,7 @@ from app.services.secrets import secret_backend_status
 
 install_focused_validation()
 install_ai_instrumentation()
+install_ptbr_guard()
 install_operational_tools()
 install_worker_cancel_watchdog()
 app = typer.Typer(no_args_is_help=True)
@@ -42,6 +44,7 @@ def run(
         f"Segredos: {secret_backend_status(settings).get('backend')}\n"
         f"StrictHostKeyChecking: {settings.ssh_strict_host_key_checking}\n"
         f"Coleta focada: {focused}\n"
+        f"Idioma das mensagens: pt-BR\n"
         f"Cancelamento forçado: {cancel_grace}s",
         title="Agent IA Worker",
     ))
