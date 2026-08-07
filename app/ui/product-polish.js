@@ -87,11 +87,11 @@
     if (!document.querySelector('link[data-datastore-monitor]')) {
       const stylesheet = document.createElement("link");
       stylesheet.rel = "stylesheet";
-      stylesheet.href = "/ui/assets/datastore-monitor.css?v=1.30.4";
+      stylesheet.href = "/ui/assets/datastore-monitor.css?v=1.30.9";
       stylesheet.dataset.datastoreMonitor = "1";
       document.head.append(stylesheet);
     }
-    import("/ui/assets/datastore-monitor.js?v=1.30.4").catch((error) => {
+    import("/ui/assets/datastore-monitor.js?v=1.30.9").catch((error) => {
       console.error("Falha ao carregar monitoramento de PostgreSQL e Redis", error);
     });
   }
