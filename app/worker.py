@@ -12,6 +12,7 @@ from app.db.base import ensure_database_schema
 from app.services.ai_instrumentation import install_ai_instrumentation
 from app.services.focused_validation import install_focused_validation
 from app.services.operational_tool_instrumentation import install_operational_tools
+from app.services.worker_cancel_watchdog import install_worker_cancel_watchdog
 from app.services.jobs import get_job, run_worker_once, worker_loop
 from app.services.secrets import secret_backend_status
 
@@ -19,6 +20,7 @@ from app.services.secrets import secret_backend_status
 install_focused_validation()
 install_ai_instrumentation()
 install_operational_tools()
+install_worker_cancel_watchdog()
 app = typer.Typer(no_args_is_help=True)
 console = Console()
 
@@ -32,13 +34,15 @@ def run(
     settings = get_settings()
     ensure_database_schema()
     focused = os.getenv("AGENT_FAST_VALIDATION_ENABLED", "true").strip().lower()
+    cancel_grace = os.getenv("AGENT_CANCEL_FORCE_EXIT_SECONDS", "20").strip()
     console.print(Panel(
         f"Worker: {settings.agent_worker_name}\n"
         f"Fila: {settings.agent_queue_name}\n"
         f"Redis: configurado\n"
         f"Segredos: {secret_backend_status(settings).get('backend')}\n"
         f"StrictHostKeyChecking: {settings.ssh_strict_host_key_checking}\n"
-        f"Coleta focada: {focused}",
+        f"Coleta focada: {focused}\n"
+        f"Cancelamento forçado: {cancel_grace}s",
         title="Agent IA Worker",
     ))
     if once:
