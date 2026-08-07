@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tomllib
 
 import pytest
 from rich.console import Console
@@ -14,6 +15,7 @@ from app.cli.help_screen import render_full_help, should_show_full_help, should_
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_VERSION = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
 
 
 def _rendered_help() -> str:
@@ -116,7 +118,7 @@ def test_entrypoint_routes_ai_doctor_help(monkeypatch) -> None:
 @pytest.mark.parametrize(
     ("argument", "expected"),
     [
-        ("--version", "Agent IA Infra 1.30.3"),
+        ("--version", f"Agent IA Infra {PROJECT_VERSION}"),
         ("--help", "AGENT IA INFRA"),
     ],
 )

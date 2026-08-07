@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
 
+from app.core.settings import get_settings
+from app.services.datastore_metrics import datastore_resource_snapshot
 from app.services.execution_store import get_execution_store
 from app.services.metrics import render_prometheus, snapshot
 from app.services.performance_config import get_performance_config
@@ -39,3 +41,10 @@ def observability_summary(request: Request) -> dict:
         },
         "metrics": snapshot(),
     }
+
+
+@router.get("/ui/api/datastores/resources")
+def datastore_resources(request: Request) -> dict:
+    """Retorna métricas operacionais sem URLs, usuários, senhas ou tokens."""
+    _require_access(request)
+    return datastore_resource_snapshot(get_settings())

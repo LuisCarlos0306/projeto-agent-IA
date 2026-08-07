@@ -8,17 +8,19 @@ RELEASE_UNITS = ROOT / "deploy" / "systemd" / "release"
 AUTO_MERGE_WORKFLOW = ROOT / ".github" / "workflows" / "auto-merge.yml"
 
 
-def test_production_deploy_runs_only_after_main_validation_and_tag() -> None:
+def test_ci_validates_pull_requests_and_tags_main_without_self_hosted_runner() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert "ready_for_review" in workflow
     assert "workflow_dispatch:" in workflow
-    assert "release_sha:" in workflow
-    assert 'O SHA solicitado não é o HEAD atual da main.' in workflow
-    assert "needs:\n      - validate\n      - tag" in workflow
-    assert "github.event_name == 'workflow_dispatch'" in workflow
-    assert "runs-on: [self-hosted, Linux, X64, agent-ia-prod]" in workflow
-    assert "bash deploy/scripts/deploy_release.sh --activate" in workflow
+    assert "runs-on: ubuntu-latest" in workflow
+    assert "Validar código" in workflow
+    assert "Criar tag da versão" in workflow
+    assert "github.event_name == 'push'" in workflow
+    assert "refs/heads/main" in workflow
+    assert "runs-on: [self-hosted" not in workflow
+    assert "bash deploy/scripts/deploy_release.sh --activate" not in workflow
+    assert "\n  deploy:" not in workflow
     assert "pull_request_target" not in workflow
 
 
@@ -49,11 +51,15 @@ def test_release_units_follow_atomic_current_symlink() -> None:
         assert "projeto-agent-ia/.env" not in unit
 
 
-def test_auto_merge_uses_workflow_run_payload_for_pull_request() -> None:
+def test_auto_merge_uses_successful_pull_request_workflow_run() -> None:
     workflow = AUTO_MERGE_WORKFLOW.read_text(encoding="utf-8")
 
     assert "github.event.workflow_run.pull_requests[0].number" in workflow
+    assert "github.event.workflow_run.conclusion == 'success'" in workflow
     assert 'actions/runs/${RUN_ID}/pull_requests' not in workflow
-    assert "actions: write" in workflow
-    assert "gh workflow run ci-release.yml" in workflow
-    assert 'release_sha="$MERGE_SHA"' in workflow
+    assert "contents: write" in workflow
+    assert "pull-requests: write" in workflow
+    assert "actions: write" not in workflow
+    assert "gh workflow run ci-release.yml" not in workflow
+    assert "merge_method=squash" in workflow
+    assert "manual-review" in workflow
