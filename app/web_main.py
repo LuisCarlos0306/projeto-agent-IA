@@ -18,6 +18,7 @@ install_multi_host_instrumentation()
 from app.web import register_ui
 from app.web_batch import router as batch_router
 from app.web_executions import router as executions_router
+from app.web_fast_validation import register_fast_validation_ui
 from app.web_flow import router as flow_router
 from app.web_incidents import router as incidents_router
 from app.web_observability import router as observability_router
@@ -34,6 +35,7 @@ enable_dynamic_provider_payload()
 if not getattr(app.state, "agent_ui_cache_registered", False):
     app.include_router(ui_cache_router)
     app.state.agent_ui_cache_registered = True
+register_fast_validation_ui(app)
 register_ui(app)
 if not getattr(app.state, "agent_ui_batch_registered", False):
     app.include_router(batch_router)
