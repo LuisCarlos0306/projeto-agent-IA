@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from app.web import UI_DIR, _require_access
 
 
-ASSET_VERSION = "1.30.6"
+ASSET_VERSION = "1.30.8"
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -65,12 +65,20 @@ def focused_validation_payload() -> dict[str, object]:
 
 def _enhanced_index() -> str:
     html = (UI_DIR / "index.html").read_text(encoding="utf-8")
-    stylesheet = f'<link rel="stylesheet" href="/ui/assets/fast-validation-ui.css?v={ASSET_VERSION}">'
-    script = f'<script src="/ui/assets/fast-validation-ui.js?v={ASSET_VERSION}" defer></script>'
-    if stylesheet not in html:
-        html = html.replace("</head>", f"  {stylesheet}\n</head>")
-    if script not in html:
-        html = html.replace("</body>", f"  {script}\n</body>")
+    stylesheets = (
+        f'<link rel="stylesheet" href="/ui/assets/fast-validation-ui.css?v={ASSET_VERSION}">',
+        f'<link rel="stylesheet" href="/ui/assets/investigation-confidence.css?v={ASSET_VERSION}">',
+    )
+    scripts = (
+        f'<script src="/ui/assets/fast-validation-ui.js?v={ASSET_VERSION}" defer></script>',
+        f'<script src="/ui/assets/investigation-confidence.js?v={ASSET_VERSION}" defer></script>',
+    )
+    for stylesheet in stylesheets:
+        if stylesheet not in html:
+            html = html.replace("</head>", f"  {stylesheet}\n</head>")
+    for script in scripts:
+        if script not in html:
+            html = html.replace("</body>", f"  {script}\n</body>")
     return html
 
 
