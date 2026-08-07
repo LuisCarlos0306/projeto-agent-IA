@@ -103,7 +103,7 @@ def _translate_known_errors(text: str) -> str:
     return output
 
 
-def _fallback_ptbr(field: str, original: str) -> str:
+def _fallback_ptbr(field: str) -> str:
     if field == "probable_cause":
         return (
             "A causa provável não pôde ser confirmada com segurança. "
@@ -125,7 +125,7 @@ def _sanitize_text(value: str, field: str) -> str:
     if not translated:
         return translated
     if _looks_english(translated):
-        return _fallback_ptbr(field, translated)
+        return _fallback_ptbr(field)
     return translated
 
 
@@ -137,10 +137,7 @@ def _sanitize_value(value: Any, field: str = "") -> Any:
     if isinstance(value, list):
         return [_sanitize_value(item, field) for item in value]
     if isinstance(value, dict):
-        output: dict[str, Any] = {}
-        for key, item in value.items():
-            output[key] = _sanitize_value(item, str(key))
-        return output
+        return {key: _sanitize_value(item, str(key)) for key, item in value.items()}
     return value
 
 
@@ -164,6 +161,15 @@ def _wrap_inconclusive(base: Callable[..., dict[str, Any]]) -> Callable[..., dic
         return ensure_ptbr_analysis(base(*args, **kwargs))
 
     return wrapped
+
+
+def _localize_without_external_ai(
+    analysis: dict[str, Any],
+    _result: dict[str, Any],
+    _settings: Any,
+) -> dict[str, Any]:
+    """Evita uma segunda chamada de IA apenas para tradução e nunca devolve inglês ao operador."""
+    return ensure_ptbr_analysis(analysis)
 
 
 def _wrap_finalizer(base: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
@@ -190,6 +196,7 @@ def install_ptbr_guard() -> None:
     intelligent_agent.resilient_model_call = reasoning
     dynamic_agent._model_call = reasoning
     dynamic_agent._inconclusive = _wrap_inconclusive(dynamic_agent._inconclusive)
+    result_presentation._translate_user_fields = _localize_without_external_ai
     result_presentation.finalize_result_presentation = _wrap_finalizer(
         result_presentation.finalize_result_presentation
     )
