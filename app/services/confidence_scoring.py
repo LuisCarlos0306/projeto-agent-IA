@@ -30,13 +30,7 @@ def _evidence_counts(evidence: list[dict[str, Any]]) -> tuple[int, int, int]:
 
 
 def evidence_confidence(evidence: list[dict[str, Any]]) -> int:
-    """Pontua a cobertura factual sem confundir execução concluída com certeza.
-
-    Uma única evidência bem-sucedida produz confiança baixa/moderada; várias
-    evidências independentes aumentam gradualmente a cobertura. Falhas e itens
-    indisponíveis reduzem o valor. O objetivo é oferecer um piso determinístico
-    quando a IA retorna 0, sem transformar sucesso operacional em 100% arbitrário.
-    """
+    """Pontua a cobertura factual sem confundir execução concluída com certeza."""
     total, successful, failed = _evidence_counts(evidence)
     if total == 0 or successful == 0:
         return 0
@@ -53,12 +47,12 @@ def validated_confidence(
     evidence: list[dict[str, Any]] | None,
     assessments: list[dict[str, Any]] | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Calcula confiança validada usando IA + evidências persistidas.
+    """Calcula confiança validada usando raciocínio da IA e cobertura factual.
 
-    O valor devolvido pela IA é preservado quando existe, mas uma resposta 0 não
-    apaga evidências reais já executadas. A crítica independente continua tendo
-    poder de limitar o resultado. Casos inconclusivos nunca entram nas faixas de
-    confiança média/alta apenas por terem comandos bem-sucedidos.
+    A confiança cognitiva é ponderada pela evidência executada. Uma IA muito
+    confiante sem evidência permanece na faixa baixa. Quando a IA retorna zero,
+    evidências reais ainda podem produzir um valor útil. A crítica independente
+    continua podendo limitar o resultado final.
     """
     analysis = dict(analysis or {})
     evidence = list(evidence or [])
@@ -72,10 +66,18 @@ def validated_confidence(
         if isinstance(item, dict) and _percent(item.get("confidence")) > 0
     ]
     round_confidence = assessment_confidences[-1] if assessment_confidences else 0
+    cognitive_confidence = max(ai_confidence, round_confidence)
     factual_confidence = evidence_confidence(evidence)
 
-    candidates = [value for value in (ai_confidence, round_confidence, factual_confidence) if value > 0]
-    score = max(candidates) if candidates else 0
+    if cognitive_confidence > 0 and factual_confidence > 0:
+        score = round((cognitive_confidence * 0.55) + (factual_confidence * 0.45))
+    elif factual_confidence > 0:
+        score = factual_confidence
+    elif cognitive_confidence > 0:
+        # Sem evidência, a confiança da IA ainda é informativa, mas não validada.
+        score = min(cognitive_confidence, 39)
+    else:
+        score = 0
 
     critic = analysis.get("critic") if isinstance(analysis.get("critic"), dict) else {}
     critic_verdict = str(critic.get("verdict") or "").strip().casefold()
@@ -86,8 +88,8 @@ def validated_confidence(
         limits = [value for value in (critic_confidence, critic_coverage) if value > 0]
         if limits and score > 0:
             score = min(score, *limits)
-        elif limits:
-            score = min(limits)
+        elif limits and factual_confidence > 0:
+            score = min(factual_confidence, *limits)
     elif critic_verdict in {"insufficient", "contradictory"}:
         limits = [39]
         if critic_confidence > 0:
@@ -104,6 +106,7 @@ def validated_confidence(
         "version": 1,
         "ai_confidence": ai_confidence,
         "round_confidence": round_confidence,
+        "cognitive_confidence": cognitive_confidence,
         "evidence_confidence": factual_confidence,
         "evidence_total": total,
         "evidence_successful": successful,
