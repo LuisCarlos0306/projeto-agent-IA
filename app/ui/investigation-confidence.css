@@ -1,0 +1,78 @@
+.investigation-confidence-cell {
+  min-width: 190px;
+}
+
+.investigation-confidence-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 170px;
+  color: #58d68d;
+}
+
+.investigation-confidence-meter[data-level="medium"] {
+  color: #f6c85f;
+}
+
+.investigation-confidence-meter[data-level="low"] {
+  color: #ff6b6b;
+}
+
+.investigation-confidence-segments {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(5px, 1fr));
+  gap: 2px;
+  width: 112px;
+  height: 15px;
+  align-items: stretch;
+}
+
+.investigation-confidence-segments i {
+  display: block;
+  border-radius: 2px;
+  background: rgba(122, 145, 166, .16);
+  border: 1px solid rgba(122, 145, 166, .22);
+}
+
+.investigation-confidence-segments i.active {
+  background: currentColor;
+  border-color: currentColor;
+  box-shadow: 0 0 7px color-mix(in srgb, currentColor 45%, transparent);
+}
+
+.investigation-confidence-meter strong {
+  min-width: 43px;
+  text-align: right;
+  color: var(--text-primary, #edf6ff);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+/* O histórico em linha de PostgreSQL/Redis foi removido da visão geral por decisão de produto. */
+#datastore-monitor .datastore-main-grid > .datastore-panel:not(.datastore-score-panel) {
+  display: none !important;
+}
+
+#datastore-monitor .datastore-main-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+#datastore-monitor .datastore-score-panel {
+  width: 100%;
+  max-width: none;
+}
+
+@media (max-width: 760px) {
+  .investigation-confidence-cell {
+    min-width: 154px;
+  }
+
+  .investigation-confidence-meter {
+    min-width: 144px;
+    gap: 7px;
+  }
+
+  .investigation-confidence-segments {
+    width: 92px;
+  }
+}

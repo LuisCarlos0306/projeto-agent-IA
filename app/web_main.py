@@ -9,9 +9,11 @@ from app.services.ai_instrumentation import install_ai_instrumentation
 from app.services.focused_validation import install_focused_validation
 from app.services.operational_tool_instrumentation import install_operational_tools
 from app.services.multi_host_instrumentation import install_multi_host_instrumentation
+from app.services.ptbr_guard import install_ptbr_guard
 
 install_focused_validation()
 install_ai_instrumentation()
+install_ptbr_guard()
 install_operational_tools()
 install_multi_host_instrumentation()
 
