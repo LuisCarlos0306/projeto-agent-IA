@@ -33,6 +33,16 @@ def test_conclusive_result_uses_evidence_when_ai_returns_zero():
     assert basis["evidence_total"] == 4
 
 
+def test_ai_confidence_without_evidence_is_not_treated_as_validated_high():
+    score, _basis = validated_confidence(
+        status="healthy",
+        analysis={"status": "healthy", "confidence": 95},
+        evidence=[],
+        assessments=[],
+    )
+    assert score <= 39
+
+
 def test_insufficient_critic_caps_confidence_below_medium():
     score, basis = validated_confidence(
         status="healthy",
@@ -68,3 +78,25 @@ def test_accepted_critic_limits_to_coverage():
         assessments=[],
     )
     assert score == 82
+
+
+def test_recalculation_is_idempotent():
+    evidence = [{"status": "executed", "exit_code": 0}] * 3
+    first_score, first_basis = validated_confidence(
+        status="healthy",
+        analysis={"status": "healthy", "confidence": 90},
+        evidence=evidence,
+        assessments=[],
+    )
+    second_score, second_basis = validated_confidence(
+        status="healthy",
+        analysis={
+            "status": "healthy",
+            "confidence": first_score,
+            "validated_confidence_basis": first_basis,
+        },
+        evidence=evidence,
+        assessments=[],
+    )
+    assert second_score == first_score
+    assert second_basis["ai_confidence"] == 90
