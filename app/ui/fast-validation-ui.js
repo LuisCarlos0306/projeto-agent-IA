@@ -150,7 +150,27 @@
     status.innerHTML = `<span class="fast-validation-pulse" aria-hidden="true"></span><div><strong>${config.enabled ? "Coleta focada ativa" : "Coleta focada desativada"}</strong><p>${activeDetail}</p><small>${timing} · até ${config.max_rounds} rodadas · ${config.tools_per_round} ferramentas por rodada · timeout da IA ${formatDuration(config.ai_request_timeout_seconds)}</small></div>`;
   }
 
+  function syncTerminalProgressState() {
+    const summary = document.querySelector(".execution-progress-summary");
+    if (!summary) return;
+
+    const title = String(document.querySelector("#result-title")?.textContent || "").trim().toLowerCase();
+    const percentText = String(summary.querySelector(".execution-progress-title > b")?.textContent || "0");
+    const percent = Number(percentText.replace(/[^0-9]/g, "")) || 0;
+    const timeline = [...document.querySelectorAll(".execution-timeline .timeline-item")];
+
+    let status = "running";
+    if (title.includes("falha")) status = "failed";
+    else if (title.includes("cancelando")) status = "cancelling";
+    else if (title.includes("cancelada")) status = "cancelled";
+    else if (percent >= 100 || (timeline.length > 0 && timeline.every((item) => item.classList.contains("completed")))) status = "completed";
+
+    summary.dataset.status = status;
+  }
+
   function enhanceProgress() {
+    syncTerminalProgressState();
+
     const panel = document.querySelector(".execution-live-panel");
     if (!panel) return;
     translateCurrentStage(panel);
@@ -190,7 +210,7 @@
   function start() {
     void loadConfig();
     const observer = new MutationObserver(scheduleEnhancement);
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["class", "data-status", "style"] });
     window.setInterval(scheduleEnhancement, 1000);
     scheduleEnhancement();
   }
