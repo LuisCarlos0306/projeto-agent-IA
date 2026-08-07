@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import typer
 from rich.console import Console
@@ -8,11 +9,15 @@ from rich.panel import Panel
 
 from app.core.settings import get_settings
 from app.db.base import ensure_database_schema
+from app.services.ai_instrumentation import install_ai_instrumentation
+from app.services.focused_validation import install_focused_validation
 from app.services.operational_tool_instrumentation import install_operational_tools
 from app.services.jobs import get_job, run_worker_once, worker_loop
 from app.services.secrets import secret_backend_status
 
 
+install_focused_validation()
+install_ai_instrumentation()
 install_operational_tools()
 app = typer.Typer(no_args_is_help=True)
 console = Console()
@@ -26,12 +31,14 @@ def run(
     """Executa jobs da fila Redis usando a conectividade deste worker."""
     settings = get_settings()
     ensure_database_schema()
+    focused = os.getenv("AGENT_FAST_VALIDATION_ENABLED", "true").strip().lower()
     console.print(Panel(
         f"Worker: {settings.agent_worker_name}\n"
         f"Fila: {settings.agent_queue_name}\n"
         f"Redis: configurado\n"
         f"Segredos: {secret_backend_status(settings).get('backend')}\n"
-        f"StrictHostKeyChecking: {settings.ssh_strict_host_key_checking}",
+        f"StrictHostKeyChecking: {settings.ssh_strict_host_key_checking}\n"
+        f"Coleta focada: {focused}",
         title="Agent IA Worker",
     ))
     if once:
