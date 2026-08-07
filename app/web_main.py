@@ -6,6 +6,7 @@ import uvicorn
 
 from app.main import app
 from app.services.ai_instrumentation import install_ai_instrumentation
+from app.services.confidence_instrumentation import install_confidence_instrumentation
 from app.services.focused_validation import install_focused_validation
 from app.services.operational_tool_instrumentation import install_operational_tools
 from app.services.multi_host_instrumentation import install_multi_host_instrumentation
@@ -16,6 +17,7 @@ install_ai_instrumentation()
 install_ptbr_guard()
 install_operational_tools()
 install_multi_host_instrumentation()
+install_confidence_instrumentation()
 
 from app.web import register_ui
 from app.web_batch import router as batch_router
