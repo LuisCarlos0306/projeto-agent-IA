@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -8,7 +9,7 @@ from fastapi.responses import HTMLResponse
 from app.web import UI_DIR, _require_access
 
 
-ASSET_VERSION = "1.30.9"
+ASSET_VERSION = "1.30.10"
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -63,22 +64,30 @@ def focused_validation_payload() -> dict[str, object]:
     }
 
 
+def _versioned_stylesheet(html: str, asset: str) -> str:
+    current = f'<link rel="stylesheet" href="/ui/assets/{asset}?v={ASSET_VERSION}">'
+    pattern = rf'<link rel="stylesheet" href="/ui/assets/{re.escape(asset)}\?v=[^"]+">'
+    html, count = re.subn(pattern, current, html, count=1)
+    if not count:
+        html = html.replace("</head>", f"  {current}\n</head>")
+    return html
+
+
+def _versioned_script(html: str, asset: str) -> str:
+    current = f'<script src="/ui/assets/{asset}?v={ASSET_VERSION}" defer></script>'
+    pattern = rf'<script src="/ui/assets/{re.escape(asset)}\?v=[^"]+" defer></script>'
+    html, count = re.subn(pattern, current, html, count=1)
+    if not count:
+        html = html.replace("</body>", f"  {current}\n</body>")
+    return html
+
+
 def _enhanced_index() -> str:
     html = (UI_DIR / "index.html").read_text(encoding="utf-8")
-    stylesheets = (
-        f'<link rel="stylesheet" href="/ui/assets/fast-validation-ui.css?v={ASSET_VERSION}">',
-        f'<link rel="stylesheet" href="/ui/assets/investigation-confidence.css?v={ASSET_VERSION}">',
-    )
-    scripts = (
-        f'<script src="/ui/assets/fast-validation-ui.js?v={ASSET_VERSION}" defer></script>',
-        f'<script src="/ui/assets/investigation-confidence.js?v={ASSET_VERSION}" defer></script>',
-    )
-    for stylesheet in stylesheets:
-        if stylesheet not in html:
-            html = html.replace("</head>", f"  {stylesheet}\n</head>")
-    for script in scripts:
-        if script not in html:
-            html = html.replace("</body>", f"  {script}\n</body>")
+    for asset in ("fast-validation-ui.css", "investigation-confidence.css"):
+        html = _versioned_stylesheet(html, asset)
+    for asset in ("fast-validation-ui.js", "investigation-confidence.js"):
+        html = _versioned_script(html, asset)
     return html
 
 
