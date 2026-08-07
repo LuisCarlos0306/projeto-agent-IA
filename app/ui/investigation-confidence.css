@@ -48,18 +48,39 @@
   font-size: 12px;
 }
 
-/* O histórico em linha de PostgreSQL/Redis foi removido da visão geral por decisão de produto. */
+/* Mantém o contrato anterior de remoção do histórico e oculta também o estado geral. */
 #datastore-monitor .datastore-main-grid > .datastore-panel:not(.datastore-score-panel) {
   display: none !important;
 }
 
 #datastore-monitor .datastore-main-grid {
-  grid-template-columns: minmax(0, 1fr) !important;
+  display: none !important;
 }
 
-#datastore-monitor .datastore-score-panel {
-  width: 100%;
-  max-width: none;
+/* Substitui o avatar circular roxo por um robô operacional. */
+.operator-avatar {
+  position: relative;
+  width: 42px !important;
+  height: 42px !important;
+  margin-top: 0 !important;
+  border-radius: 13px !important;
+  display: grid !important;
+  place-items: center !important;
+  overflow: visible;
+  font-size: 0 !important;
+  color: transparent !important;
+  background: linear-gradient(145deg, #0b1b2d, #123653) !important;
+  border: 1px solid rgba(77, 216, 255, .42);
+  box-shadow: 0 0 0 3px rgba(77, 216, 255, .06), 0 9px 24px rgba(0, 0, 0, .24);
+}
+
+.operator-avatar::before {
+  content: "🤖";
+  display: block;
+  color: initial;
+  font-size: 24px;
+  line-height: 1;
+  filter: drop-shadow(0 0 7px rgba(77, 216, 255, .24));
 }
 
 @media (max-width: 760px) {
