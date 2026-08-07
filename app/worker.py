@@ -10,6 +10,7 @@ from rich.panel import Panel
 from app.core.settings import get_settings
 from app.db.base import ensure_database_schema
 from app.services.ai_instrumentation import install_ai_instrumentation
+from app.services.confidence_instrumentation import install_confidence_instrumentation
 from app.services.focused_validation import install_focused_validation
 from app.services.hard_job_alarm import install_hard_job_alarm
 from app.services.job_process_guard import install_job_process_guard
@@ -24,6 +25,7 @@ install_focused_validation()
 install_ai_instrumentation()
 install_ptbr_guard()
 install_operational_tools()
+install_confidence_instrumentation()
 install_worker_cancel_watchdog()
 install_hard_job_alarm()
 install_job_process_guard()
@@ -50,6 +52,7 @@ def run(
         f"StrictHostKeyChecking: {settings.ssh_strict_host_key_checking}\n"
         f"Coleta focada: {focused}\n"
         f"Idioma das mensagens: pt-BR\n"
+        f"Confiança por evidências: ativa\n"
         f"Cancelamento forçado: {cancel_grace}s\n"
         f"Timeout duro por job: {hard_timeout}s\n"
         f"Isolamento por processo: ativo",
