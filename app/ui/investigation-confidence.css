@@ -48,7 +48,11 @@
   font-size: 12px;
 }
 
-/* O dashboard não exibe mais o histórico nem o bloco de estado geral dos bancos. */
+/* Mantém o contrato anterior de remoção do histórico e oculta também o estado geral. */
+#datastore-monitor .datastore-main-grid > .datastore-panel:not(.datastore-score-panel) {
+  display: none !important;
+}
+
 #datastore-monitor .datastore-main-grid {
   display: none !important;
 }
