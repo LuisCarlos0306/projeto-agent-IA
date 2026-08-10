@@ -14,6 +14,7 @@ from app.services.confidence_instrumentation import install_confidence_instrumen
 from app.services.focused_validation import install_focused_validation
 from app.services.hard_job_alarm import install_hard_job_alarm
 from app.services.job_process_guard import install_job_process_guard
+from app.services.mount_job_instrumentation import install_mount_jobs
 from app.services.operational_tool_instrumentation import install_operational_tools
 from app.services.ptbr_guard import install_ptbr_guard
 from app.services.worker_cancel_watchdog import _hard_timeout_seconds, install_worker_cancel_watchdog
@@ -25,6 +26,7 @@ install_focused_validation()
 install_ai_instrumentation()
 install_ptbr_guard()
 install_operational_tools()
+install_mount_jobs()
 install_confidence_instrumentation()
 install_worker_cancel_watchdog()
 install_hard_job_alarm()
@@ -51,6 +53,7 @@ def run(
         f"Segredos: {secret_backend_status(settings).get('backend')}\n"
         f"StrictHostKeyChecking: {settings.ssh_strict_host_key_checking}\n"
         f"Coleta focada: {focused}\n"
+        f"Mount recovery: validação + confirmação humana\n"
         f"Idioma das mensagens: pt-BR\n"
         f"Confiança por evidências: ativa\n"
         f"Cancelamento forçado: {cancel_grace}s\n"
