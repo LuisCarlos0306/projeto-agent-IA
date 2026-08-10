@@ -57,3 +57,28 @@ def test_omd_adjustments_are_allowed_only_in_monitoring_or_training():
         decision = evaluate_action(ActionType.OMD_ADJUSTMENT, environment)
         assert decision.allowed
         assert decision.requires_approval
+
+
+def test_mount_recovery_has_dedicated_approval_policy():
+    commands = (
+        "/db/backup/scripts/mount.sh",
+        "sudo -u mssql -- /db/backup/scripts/mount.sh",
+        "sudo -u oracle -- /db/backup/scripts/mount.sh",
+    )
+    for command in commands:
+        assert classify_command(command) == ActionType.MOUNT_RECOVERY
+
+    for environment in (
+        EnvironmentType.PRODUCTION,
+        EnvironmentType.STANDBY,
+        EnvironmentType.MONITORING,
+        EnvironmentType.TRAINING,
+    ):
+        decision = evaluate_action(ActionType.MOUNT_RECOVERY, environment)
+        assert decision.allowed
+        assert decision.requires_approval
+        assert decision.policy_code == "MOUNT_RECOVERY_APPROVAL_REQUIRED"
+
+    unknown = evaluate_action(ActionType.MOUNT_RECOVERY, EnvironmentType.UNKNOWN)
+    assert not unknown.allowed
+    assert unknown.requires_approval
