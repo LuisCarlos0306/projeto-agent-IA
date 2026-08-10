@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.core.policies import EnvironmentType
@@ -13,7 +14,7 @@ from app.services.mount_jobs import (
     get_mount_job,
 )
 from app.services.mount_ops import MountOperationError
-from app.web import _operator_name, _require_access, _require_mutation
+from app.web import UI_DIR, _operator_name, _require_access, _require_mutation
 
 
 router = APIRouter(tags=["mount-validation"])
@@ -29,6 +30,12 @@ class MountValidationPayload(BaseModel):
 class MountRecoveryPayload(BaseModel):
     validation_job_id: str = Field(min_length=16, max_length=128)
     confirm: bool = False
+
+
+@router.get("/ui/mounts", include_in_schema=False)
+def mount_validation_page(request: Request) -> FileResponse:
+    _require_access(request)
+    return FileResponse(UI_DIR / "mounts.html")
 
 
 @router.post("/ui/api/mounts/validate")
