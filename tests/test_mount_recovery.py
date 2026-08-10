@@ -2,6 +2,7 @@ import pytest
 
 from app.core.policies import EnvironmentType
 from app.services.correction_policy import MOUNT_RECOVERY_SCRIPT, validate_correction
+from app.services.mount_jobs import MOUNT_RECOVERY_JOB, MOUNT_VALIDATION_JOB, _mount_activity_document
 from app.services.mount_ops import (
     MountOperationError,
     _mount_execution_command,
@@ -177,3 +178,68 @@ def test_ssh_policy_rejects_altered_mount_script_after_approval():
 
     with pytest.raises(PermissionError):
         executor._validate(MOUNT_RECOVERY_SCRIPT + " --force", EnvironmentType.PRODUCTION, approved=True)
+
+
+def test_mount_validation_history_is_healthy_with_full_confidence_when_mounted():
+    document = _mount_activity_document(
+        MOUNT_VALIDATION_JOB,
+        {
+            "target": "172.27.228.33",
+            "resolved_host": "172.27.228.33",
+            "environment": "production",
+            "path": "/mnt/backup_check",
+            "mounted": True,
+            "source": "/dev/sdc1",
+            "fstype": "xfs",
+            "cron_user": "root",
+        },
+        duration_ms=850,
+    )
+
+    assert document["status"] == "healthy"
+    assert document["confidence"] == 100
+    assert document["profile"] == "mount"
+    assert document["analysis"]["operation"] == MOUNT_VALIDATION_JOB
+    assert document["analysis"]["deterministic_validation"] is True
+
+
+def test_mount_validation_history_is_attention_with_full_confidence_when_unmounted():
+    document = _mount_activity_document(
+        MOUNT_VALIDATION_JOB,
+        {
+            "target": "172.27.228.33",
+            "resolved_host": "172.27.228.33",
+            "environment": "production",
+            "path": "/mnt/backup_check",
+            "mounted": False,
+            "can_request_mount": True,
+            "cron_user": "root",
+        },
+        duration_ms=640,
+    )
+
+    assert document["status"] == "attention"
+    assert document["confidence"] == 100
+    assert document["mode"] == "investigate"
+    assert document["plans"][0]["playbook"]["title"] == "Validação de mount"
+
+
+def test_mount_recovery_history_is_healthy_when_post_validation_is_mounted():
+    document = _mount_activity_document(
+        MOUNT_RECOVERY_JOB,
+        {
+            "target": "172.27.228.33",
+            "resolved_host": "172.27.228.33",
+            "environment": "production",
+            "path": "/mnt/backup_check",
+            "mounted": True,
+            "execution_user": "root",
+            "after": {"source": "/dev/sdc1", "fstype": "xfs"},
+        },
+        duration_ms=2100,
+    )
+
+    assert document["status"] == "healthy"
+    assert document["confidence"] == 100
+    assert document["mode"] == "correct"
+    assert document["plans"][0]["playbook"]["title"] == "Montagem preventiva"
