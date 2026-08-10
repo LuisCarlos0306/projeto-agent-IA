@@ -10,6 +10,7 @@ from app.services.ai_instrumentation import install_ai_instrumentation
 from app.services.confidence_instrumentation import install_confidence_instrumentation
 from app.services.focused_validation import install_focused_validation
 from app.services.hard_job_alarm import install_hard_job_alarm
+from app.services.mount_job_instrumentation import install_mount_jobs
 from app.services.operational_tool_instrumentation import install_operational_tools
 from app.services.ptbr_guard import install_ptbr_guard
 from app.services.worker_cancel_watchdog import install_worker_cancel_watchdog
@@ -29,6 +30,7 @@ def main() -> int:
     install_ai_instrumentation()
     install_ptbr_guard()
     install_operational_tools()
+    install_mount_jobs()
     install_confidence_instrumentation()
     install_worker_cancel_watchdog()
     install_hard_job_alarm()
