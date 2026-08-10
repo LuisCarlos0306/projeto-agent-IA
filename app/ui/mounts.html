@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Agent IA — Validação de Mount</title>
+  <link rel="stylesheet" href="/ui/assets/styles.css?v=1.30.17">
+  <link rel="stylesheet" href="/ui/assets/cyber-theme.css?v=1.30.17">
+  <link rel="stylesheet" href="/ui/assets/mount-recovery.css?v=1.30.17">
+  <style>
+    body { min-height: 100vh; margin: 0; }
+    .mount-page-shell { min-height: 100vh; padding: 32px; display: grid; place-items: center; }
+    .mount-page-card { width: min(720px, 96vw); padding: 28px; border: 1px solid rgba(120,160,210,.25); border-radius: 20px; background: rgba(12,20,34,.92); box-shadow: 0 24px 80px rgba(0,0,0,.3); }
+    .mount-page-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
+    .mount-page-head h1 { margin: 4px 0 0; font-size: clamp(1.45rem, 3vw, 2.1rem); }
+    .mount-page-card p { opacity: .78; line-height: 1.55; }
+    .mount-page-actions { display: flex; align-items: center; gap: 12px; margin-top: 22px; flex-wrap: wrap; }
+    .mount-page-note { margin-top: 20px; padding: 14px; border-radius: 12px; border: 1px solid rgba(80,210,255,.2); background: rgba(80,210,255,.05); font-size: .92rem; }
+    .mount-page-hidden-anchor { display: none !important; }
+  </style>
+</head>
+<body>
+  <main class="mount-page-shell">
+    <section class="mount-page-card">
+      <div class="mount-page-head">
+        <div>
+          <p class="eyebrow">STORAGE / BACKUP</p>
+          <h1>Validação e montagem preventiva</h1>
+        </div>
+        <a class="secondary-button" href="/ui">Voltar</a>
+      </div>
+      <p>Valide o ponto de montagem. Se a unidade estiver desmontada e o script padrão estiver seguro, o Agent IA oferecerá a opção de solicitar a montagem.</p>
+      <div class="mount-page-actions">
+        <button id="topbar-start-investigation" class="mount-page-hidden-anchor" type="button" aria-hidden="true"></button>
+      </div>
+      <div class="mount-page-note">
+        A montagem executa exclusivamente <code>/db/backup/scripts/mount.sh</code>, somente após validação anterior e confirmação do operador. Depois da execução, o ponto de montagem é validado novamente.
+      </div>
+    </section>
+  </main>
+  <script src="/ui/assets/mount-recovery.js?v=1.30.17" defer></script>
+</body>
+</html>
