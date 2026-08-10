@@ -17,6 +17,8 @@ class ActionType(StrEnum):
     READ_ONLY = "read_only"
     SERVICE_ADJUSTMENT = "service_adjustment"
     OMD_ADJUSTMENT = "omd_adjustment"
+    MOUNT_RECOVERY = "mount_recovery"
+    MOUNT_REMOUNT = "mount_remount"
     CONTAINER_ADJUSTMENT = "container_adjustment"
     DESTRUCTIVE = "destructive"
     HOST_REBOOT = "host_reboot"
@@ -33,6 +35,17 @@ class PolicyDecision:
 
 REBOOT_RE = re.compile(r"(^|[;&|]\s*)(reboot|shutdown|poweroff|halt|init\s+6|systemctl\s+reboot)\b", re.I)
 DB_CLIENT_RE = re.compile(r"(^|[;&|]\s*)(sqlplus|rman|psql|mysql|mariadb|sqlcmd|mongosh?|redis-cli)\b", re.I)
+MOUNT_RECOVERY_RE = re.compile(
+    r"^(?:sudo\s+-u\s+[A-Za-z_][A-Za-z0-9_.-]{0,63}\s+--\s+)?/db/backup/scripts/mount\.sh$"
+)
+MOUNT_REMOUNT_RE = re.compile(
+    r"^timeout\s+30\s+umount\s+--\s+/[A-Za-z0-9_./@:+-]+$",
+    re.I,
+)
+GENERIC_MOUNT_COMMAND_RE = re.compile(
+    r"(^|[;&|]\s*)(?:sudo\s+)?(?:(?:timeout\s+\d+\s+)?umount|mount)\b",
+    re.I,
+)
 
 PAIRED_SERVICE_STOP_START_RE = re.compile(
     r"^(?:sudo\s+)?systemctl\s+stop\s+([A-Za-z0-9_.@:-]+)\s*&&\s*(?:sudo\s+)?systemctl\s+start\s+\1$",
@@ -64,12 +77,18 @@ SERVICE_ADJUST_RE = re.compile(r"\b(systemctl\s+(start|restart|reload|enable)|se
 
 def classify_command(command: str) -> ActionType:
     command = command.strip()
+    if MOUNT_RECOVERY_RE.fullmatch(command):
+        return ActionType.MOUNT_RECOVERY
+    if MOUNT_REMOUNT_RE.fullmatch(command):
+        return ActionType.MOUNT_REMOUNT
     if REBOOT_RE.search(command):
         return ActionType.HOST_REBOOT
     if DB_CLIENT_RE.search(command):
         return ActionType.DATABASE_ACCESS
     if CONTAINER_LIFECYCLE_RE.search(command):
         return ActionType.CONTAINER_ADJUSTMENT
+    if GENERIC_MOUNT_COMMAND_RE.search(command):
+        return ActionType.DESTRUCTIVE
     if PAIRED_SERVICE_STOP_START_RE.fullmatch(command) or PAIRED_LEGACY_STOP_START_RE.fullmatch(command):
         return ActionType.SERVICE_ADJUSTMENT
     if PAIRED_OMD_STOP_START_RE.fullmatch(command):
@@ -88,6 +107,7 @@ def environment_allows_correction(environment: EnvironmentType) -> bool:
 
     Produção e standby são sempre investigados e recebem propostas. Ambiente
     desconhecido permanece somente leitura até ser classificado no inventário.
+    Mount e remontagem preventiva usam políticas dedicadas com confirmação humana.
     """
     return environment in {EnvironmentType.MONITORING, EnvironmentType.TRAINING}
 
@@ -100,7 +120,20 @@ def evaluate_action(action: ActionType, environment: EnvironmentType) -> PolicyD
     if action == ActionType.CONTAINER_ADJUSTMENT:
         return PolicyDecision(False, False, "Stop, start, restart, kill ou remoção de container são proibidos.", "CONTAINER_LIFECYCLE_DENIED")
     if action == ActionType.DESTRUCTIVE:
-        return PolicyDecision(False, True, "Remoção, exclusão, desinstalação ou parada isolada não é executada automaticamente.", "DESTRUCTIVE_ACTION_DENIED")
+        return PolicyDecision(False, True, "Remoção, exclusão, desmontagem genérica, desinstalação ou parada isolada não é executada automaticamente.", "DESTRUCTIVE_ACTION_DENIED")
+    if action == ActionType.MOUNT_RECOVERY:
+        if environment == EnvironmentType.UNKNOWN:
+            return PolicyDecision(False, True, "O ambiente precisa estar classificado antes da montagem.", "UNKNOWN_ENVIRONMENT_MOUNT_DENIED")
+        return PolicyDecision(True, True, "Montagem preventiva restrita ao script padrão, com validação anterior e confirmação humana.", "MOUNT_RECOVERY_APPROVAL_REQUIRED")
+    if action == ActionType.MOUNT_REMOUNT:
+        if environment == EnvironmentType.UNKNOWN:
+            return PolicyDecision(False, True, "O ambiente precisa estar classificado antes da remontagem.", "UNKNOWN_ENVIRONMENT_REMOUNT_DENIED")
+        return PolicyDecision(
+            True,
+            True,
+            "Remontagem restrita a mount previamente identificado como Hanging, usando umount normal temporizado, sem force/lazy, confirmação humana e pós-validação.",
+            "MOUNT_REMOUNT_APPROVAL_REQUIRED",
+        )
     if action in {ActionType.SERVICE_ADJUSTMENT, ActionType.OMD_ADJUSTMENT}:
         if environment == EnvironmentType.UNKNOWN:
             return PolicyDecision(False, True, "O ambiente precisa ser classificado antes de qualquer alteração.", "UNKNOWN_ENVIRONMENT_CHANGE_DENIED")

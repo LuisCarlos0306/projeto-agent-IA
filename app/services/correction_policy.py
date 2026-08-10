@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 
@@ -10,6 +11,15 @@ class CorrectionDecision:
     reason: str
     action_type: str | None = None
 
+
+MOUNT_RECOVERY_SCRIPT = "/db/backup/scripts/mount.sh"
+MOUNT_RUN_AS_RE = re.compile(
+    r"^sudo\s+-u\s+([A-Za-z_][A-Za-z0-9_.-]{0,63})\s+--\s+/db/backup/scripts/mount\.sh$"
+)
+MOUNT_REMOUNT_RE = re.compile(
+    r"^timeout\s+30\s+umount\s+--\s+(/[A-Za-z0-9_./@:+-]+)$",
+    re.IGNORECASE,
+)
 
 ABSOLUTELY_FORBIDDEN = (
     " rm ", "rm -", "unlink ", "rmdir ", "delete ", "truncate ",
@@ -22,7 +32,7 @@ ABSOLUTELY_FORBIDDEN = (
     "iptables ", "nft ", "firewall-cmd", "ufw ",
     "drop database", "drop table", "delete from", "truncate table", "alter table", "update ", "insert into",
     "sed -i", "tee ", "echo ", "cat >", ">", ">>", "curl |", "wget |", "bash -c", "sh -c",
-    "kill ", "pkill", "killall", "crontab -r",
+    "kill ", "pkill", "killall", "crontab -r", " umount ", " mount ",
 )
 
 PROTECTED_UNIT_TERMS = (
@@ -66,15 +76,52 @@ def _allowed_system_unit(unit: str) -> bool:
     return any(pattern.fullmatch(unit) for pattern in ALLOWED_SYSTEMD_UNITS)
 
 
+def _allowed_mount_target(path: str) -> bool:
+    if not path.startswith("/") or path == "/" or ".." in path.split("/"):
+        return False
+    raw = os.getenv("AGENT_MOUNT_ALLOWED_PREFIXES", "/mnt,/backup,/db/backup")
+    prefixes = [item.strip().rstrip("/") for item in raw.split(",") if item.strip()]
+    return bool(prefixes) and any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes)
+
+
 def validate_correction(command: str) -> CorrectionDecision:
-    """Autoriza somente recuperação controlada de componentes de monitoramento.
+    """Autoriza somente recuperações operacionais explicitamente controladas.
 
     A IA nunca pode parar, remover, apagar, editar, instalar, reiniciar host,
-    manipular banco de dados ou controlar o ciclo de vida de containers.
+    manipular banco de dados ou controlar o ciclo de vida de containers. As
+    exceções de storage são: o script padrão de montagem e, quando um mount foi
+    previamente validado como Hanging, um umount normal temporizado do ponto
+    autorizado. Force/lazy unmount continuam proibidos.
     """
     stripped = command.strip()
     if not stripped:
         return CorrectionDecision(False, "comando vazio")
+
+    if stripped == MOUNT_RECOVERY_SCRIPT:
+        return CorrectionDecision(
+            True,
+            "script padrão de montagem autorizado por fluxo dedicado",
+            "mount_recovery",
+        )
+
+    mount_as = MOUNT_RUN_AS_RE.fullmatch(stripped)
+    if mount_as:
+        return CorrectionDecision(
+            True,
+            f"script padrão de montagem autorizado sob o usuário de cron {mount_as.group(1)}",
+            "mount_recovery",
+        )
+
+    remount = MOUNT_REMOUNT_RE.fullmatch(stripped)
+    if remount:
+        path = remount.group(1)
+        if not _allowed_mount_target(path):
+            return CorrectionDecision(False, "ponto de montagem fora dos prefixos autorizados")
+        return CorrectionDecision(
+            True,
+            "desmontagem normal temporizada autorizada somente pelo fluxo dedicado de remontagem",
+            "mount_remount",
+        )
 
     forbidden = _contains_forbidden(stripped)
     if forbidden:

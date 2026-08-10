@@ -25,6 +25,7 @@ from app.web_executions import router as executions_router
 from app.web_fast_validation import register_fast_validation_ui
 from app.web_flow import router as flow_router
 from app.web_incidents import router as incidents_router
+from app.web_mounts import router as mounts_router
 from app.web_observability import router as observability_router
 from app.web_operator_experience import router as operator_experience_router
 from app.web_playbooks import router as playbooks_router
@@ -62,6 +63,9 @@ if not getattr(app.state, "agent_ui_flow_registered", False):
 if not getattr(app.state, "agent_ui_incidents_registered", False):
     app.include_router(incidents_router)
     app.state.agent_ui_incidents_registered = True
+if not getattr(app.state, "agent_ui_mounts_registered", False):
+    app.include_router(mounts_router)
+    app.state.agent_ui_mounts_registered = True
 if not getattr(app.state, "agent_ui_topology_registered", False):
     app.include_router(topology_router)
     app.state.agent_ui_topology_registered = True
