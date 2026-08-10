@@ -82,3 +82,36 @@ def test_mount_recovery_has_dedicated_approval_policy():
     unknown = evaluate_action(ActionType.MOUNT_RECOVERY, EnvironmentType.UNKNOWN)
     assert not unknown.allowed
     assert unknown.requires_approval
+
+
+def test_mount_remount_has_dedicated_approval_policy():
+    command = "timeout 30 umount -- /mnt/backup_check"
+    assert classify_command(command) == ActionType.MOUNT_REMOUNT
+
+    for environment in (
+        EnvironmentType.PRODUCTION,
+        EnvironmentType.STANDBY,
+        EnvironmentType.MONITORING,
+        EnvironmentType.TRAINING,
+    ):
+        decision = evaluate_action(ActionType.MOUNT_REMOUNT, environment)
+        assert decision.allowed
+        assert decision.requires_approval
+        assert decision.policy_code == "MOUNT_REMOUNT_APPROVAL_REQUIRED"
+
+    unknown = evaluate_action(ActionType.MOUNT_REMOUNT, EnvironmentType.UNKNOWN)
+    assert not unknown.allowed
+    assert unknown.requires_approval
+
+
+def test_generic_or_forced_unmount_remains_blocked():
+    for command in (
+        "umount /mnt/backup_check",
+        "umount -f /mnt/backup_check",
+        "umount -l /mnt/backup_check",
+        "timeout 30 umount -f /mnt/backup_check",
+        "mount /dev/sdc1 /mnt/backup_check",
+    ):
+        action = classify_command(command)
+        assert action == ActionType.DESTRUCTIVE
+        assert not evaluate_action(action, EnvironmentType.PRODUCTION).allowed
