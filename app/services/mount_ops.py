@@ -135,11 +135,11 @@ def _probe_command(path: str) -> str:
 def _cron_probe_command() -> str:
     script = shlex.quote(MOUNT_RECOVERY_SCRIPT)
     return (
-        f"script={script}; set -f; "
+        f"script={script}; "
         "for f in /etc/crontab /etc/cron.d/*; do "
         "[ -f \"$f\" ] || continue; "
         "while IFS= read -r line; do "
-        "set -- $line; [ \"$#\" -gt 0 ] || continue; case \"$1\" in \\#*) continue;; esac; "
+        "set -f; set -- $line; set +f; [ \"$#\" -gt 0 ] || continue; case \"$1\" in \\#*) continue;; esac; "
         "if [ \"${1#@}\" != \"$1\" ]; then "
         "[ \"$#\" -ge 3 ] || continue; schedule=\"$1\"; user=\"$2\"; shift 2; "
         "else [ \"$#\" -ge 7 ] || continue; schedule=\"$1 $2 $3 $4 $5\"; user=\"$6\"; shift 6; fi; "
@@ -151,7 +151,7 @@ def _cron_probe_command() -> str:
         "[ -d \"$d\" ] || continue; "
         "for f in \"$d\"/*; do [ -f \"$f\" ] || continue; user=$(basename \"$f\"); "
         "while IFS= read -r line; do "
-        "set -- $line; [ \"$#\" -gt 0 ] || continue; case \"$1\" in \\#*) continue;; esac; "
+        "set -f; set -- $line; set +f; [ \"$#\" -gt 0 ] || continue; case \"$1\" in \\#*) continue;; esac; "
         "if [ \"${1#@}\" != \"$1\" ]; then "
         "[ \"$#\" -ge 2 ] || continue; schedule=\"$1\"; shift 1; "
         "else [ \"$#\" -ge 6 ] || continue; schedule=\"$1 $2 $3 $4 $5\"; shift 5; fi; "
