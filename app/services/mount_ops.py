@@ -47,6 +47,11 @@ class MountProbe:
     fstype: str | None
     options: str | None
     filesystem: str | None
+    health: str
+    access_ok: bool
+    access_timeout: bool
+    access_exit_code: int | None
+    usage_percent: int | None
     script_present: bool
     script_owner: str | None
     script_group: str | None
@@ -69,6 +74,11 @@ class MountProbe:
             "fstype": self.fstype,
             "options": self.options,
             "filesystem": self.filesystem,
+            "health": self.health,
+            "access_ok": self.access_ok,
+            "access_timeout": self.access_timeout,
+            "access_exit_code": self.access_exit_code,
+            "usage_percent": self.usage_percent,
             "script": MOUNT_RECOVERY_SCRIPT,
             "script_present": self.script_present,
             "script_owner": self.script_owner,
@@ -118,12 +128,18 @@ def _probe_command(path: str) -> str:
     return (
         f"path={quoted_path}; script={quoted_script}; "
         "mounted=0; "
-        "if command -v mountpoint >/dev/null 2>&1 && mountpoint -q -- \"$path\"; then mounted=1; "
-        "elif command -v findmnt >/dev/null 2>&1 && findmnt -rn -M \"$path\" >/dev/null 2>&1; then mounted=1; fi; "
+        "if command -v findmnt >/dev/null 2>&1 && findmnt -rn -M \"$path\" >/dev/null 2>&1; then mounted=1; "
+        "elif [ -r /proc/self/mountinfo ] && awk -v p=\"$path\" '$5 == p {found=1} END {exit found ? 0 : 1}' /proc/self/mountinfo >/dev/null 2>&1; then mounted=1; fi; "
         "printf 'MOUNTED=%s\\n' \"$mounted\"; "
         "if [ \"$mounted\" -eq 1 ]; then "
         "findmnt -rn -M \"$path\" -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | head -n 1 | sed 's/^/FINDMNT=/'; "
-        "df -hP \"$path\" 2>/dev/null | tail -n 1 | sed 's/^/DF=/' || true; "
+        "access_rc=125; "
+        "if command -v timeout >/dev/null 2>&1; then timeout 6 stat -L -- \"$path\" >/dev/null 2>&1; access_rc=$?; fi; "
+        "printf 'ACCESS_RC=%s\\n' \"$access_rc\"; "
+        "if [ \"$access_rc\" -eq 124 ]; then printf 'ACCESS_TIMEOUT=1\\n'; else printf 'ACCESS_TIMEOUT=0\\n'; fi; "
+        "if [ \"$access_rc\" -eq 0 ] && command -v timeout >/dev/null 2>&1; then "
+        "timeout 6 df -hP \"$path\" 2>/dev/null | tail -n 1 | sed 's/^/DF=/' || true; "
+        "fi; "
         "fi; "
         "if [ -f \"$script\" ]; then "
         "printf 'SCRIPT_PRESENT=1\\n'; "
@@ -202,12 +218,26 @@ def _discover_cron(executor: SSHExecutor, environment: EnvironmentType) -> CronD
     return _parse_cron(result.stdout)
 
 
+def _parse_usage_percent(filesystem: str | None) -> int | None:
+    if not filesystem:
+        return None
+    for token in filesystem.split():
+        if re.fullmatch(r"\d{1,3}%", token):
+            try:
+                return max(0, min(100, int(token[:-1])))
+            except ValueError:
+                return None
+    return None
+
+
 def _parse_probe(path: str, stdout: str, cron: CronDiscovery) -> MountProbe:
     mounted = False
     source = None
     fstype = None
     options = None
     filesystem = None
+    access_exit_code = None
+    access_timeout = False
     script_present = False
     script_owner = None
     script_group = None
@@ -227,6 +257,13 @@ def _parse_probe(path: str, stdout: str, cron: CronDiscovery) -> MountProbe:
                 options = fields[3]
         elif line.startswith("DF="):
             filesystem = line.removeprefix("DF=").strip() or None
+        elif line.startswith("ACCESS_RC="):
+            try:
+                access_exit_code = int(line.removeprefix("ACCESS_RC=").strip())
+            except ValueError:
+                access_exit_code = None
+        elif line == "ACCESS_TIMEOUT=1":
+            access_timeout = True
         elif line == "SCRIPT_PRESENT=1":
             script_present = True
         elif line.startswith("SCRIPT_META="):
@@ -245,6 +282,15 @@ def _parse_probe(path: str, stdout: str, cron: CronDiscovery) -> MountProbe:
         except ValueError:
             pass
 
+    if not mounted:
+        health = "unmounted"
+    elif access_timeout or access_exit_code == 124:
+        health = "hanging"
+    elif access_exit_code == 0:
+        health = "healthy"
+    else:
+        health = "degraded"
+
     return MountProbe(
         path=path,
         mounted=mounted,
@@ -252,6 +298,11 @@ def _parse_probe(path: str, stdout: str, cron: CronDiscovery) -> MountProbe:
         fstype=fstype,
         options=options,
         filesystem=filesystem,
+        health=health,
+        access_ok=bool(mounted and access_exit_code == 0),
+        access_timeout=access_timeout,
+        access_exit_code=access_exit_code,
+        usage_percent=_parse_usage_percent(filesystem),
         script_present=script_present,
         script_owner=script_owner,
         script_group=script_group,
@@ -278,11 +329,9 @@ def probe_mount(executor: SSHExecutor, environment: EnvironmentType, path: str) 
     return _parse_probe(safe_path, result.stdout, cron)
 
 
-def _mount_block_reason(probe: MountProbe, environment: EnvironmentType) -> str | None:
-    if probe.mounted:
-        return "unidade já está montada"
+def _recovery_prerequisite_reason(probe: MountProbe, environment: EnvironmentType) -> str | None:
     if environment == EnvironmentType.UNKNOWN:
-        return "ambiente precisa estar classificado antes da montagem"
+        return "ambiente precisa estar classificado antes da alteração"
     if not probe.script_present:
         return f"script padrão não encontrado: {MOUNT_RECOVERY_SCRIPT}"
     if not probe.script_executable:
@@ -298,6 +347,20 @@ def _mount_block_reason(probe: MountProbe, environment: EnvironmentType) -> str 
     if not probe.cron_user:
         return "não foi possível identificar o usuário que executa o script no cron"
     return None
+
+
+def _mount_block_reason(probe: MountProbe, environment: EnvironmentType) -> str | None:
+    if probe.mounted:
+        return "unidade já está montada"
+    return _recovery_prerequisite_reason(probe, environment)
+
+
+def _remount_block_reason(probe: MountProbe, environment: EnvironmentType) -> str | None:
+    if not probe.mounted:
+        return "a unidade precisa estar montada para solicitar remontagem"
+    if probe.health != "hanging":
+        return "remontagem só é oferecida quando a validação detecta estado Hanging"
+    return _recovery_prerequisite_reason(probe, environment)
 
 
 def validate_mount(
@@ -318,8 +381,10 @@ def validate_mount(
     finally:
         executor.close()
 
-    reason = _mount_block_reason(probe, target.environment)
-    can_request_mount = reason is None and target.environment in _RECOVERY_ENVIRONMENTS
+    mount_reason = _mount_block_reason(probe, target.environment)
+    remount_reason = _remount_block_reason(probe, target.environment)
+    can_request_mount = mount_reason is None and target.environment in _RECOVERY_ENVIRONMENTS
+    can_request_remount = remount_reason is None and target.environment in _RECOVERY_ENVIRONMENTS
     return {
         "operation": "mount_validation",
         "target": reference,
@@ -328,7 +393,9 @@ def validate_mount(
         "environment": target.environment.value,
         **probe.as_dict(),
         "can_request_mount": can_request_mount,
-        "reason": reason,
+        "can_request_remount": can_request_remount,
+        "reason": mount_reason,
+        "remount_reason": remount_reason,
     }
 
 
@@ -338,6 +405,21 @@ def _mount_execution_command(cron_user: str) -> str:
     if cron_user == "root":
         return MOUNT_RECOVERY_SCRIPT
     return f"sudo -u {cron_user} -- {MOUNT_RECOVERY_SCRIPT}"
+
+
+def _unmount_execution_command(path: str) -> str:
+    safe_path = validate_mount_path(path)
+    return f"timeout 30 umount -- {safe_path}"
+
+
+def _validate_cron_user(executor: SSHExecutor, environment: EnvironmentType, cron_user: str) -> None:
+    user_check = executor.run_sudo(
+        f"id -u {shlex.quote(cron_user)}",
+        environment,
+        timeout=10,
+    )
+    if user_check.exit_code != 0:
+        raise MountOperationError(f"usuário do cron não existe ou não está acessível: {cron_user}")
 
 
 def recover_mount(
@@ -370,6 +452,7 @@ def recover_mount(
                 "execution_user": before.cron_user,
                 "status": "already_mounted",
                 "mounted": True,
+                "health": before.health,
                 "before": before.as_dict(),
                 "after": before.as_dict(),
                 "script_exit_code": None,
@@ -381,13 +464,7 @@ def recover_mount(
         if reason:
             raise MountOperationError(reason)
         cron_user = str(before.cron_user or "")
-        user_check = executor.run_sudo(
-            f"id -u {shlex.quote(cron_user)}",
-            target.environment,
-            timeout=10,
-        )
-        if user_check.exit_code != 0:
-            raise MountOperationError(f"usuário do cron não existe ou não está acessível: {cron_user}")
+        _validate_cron_user(executor, target.environment, cron_user)
 
         execution_command = _mount_execution_command(cron_user)
         script_result = executor.run_sudo(
@@ -397,7 +474,7 @@ def recover_mount(
             timeout=180,
         )
         after = probe_mount(executor, target.environment, safe_path)
-        success = bool(after.mounted)
+        healthy = bool(after.mounted and after.health == "healthy")
         return {
             "operation": "mount_recovery",
             "target": reference,
@@ -409,10 +486,109 @@ def recover_mount(
             "execution_user": cron_user,
             "cron_source": before.cron_source,
             "cron_schedule": before.cron_schedule,
-            "status": "mounted" if success else "failed",
-            "mounted": success,
+            "status": "mounted" if healthy else ("hanging" if after.mounted and after.health == "hanging" else "failed"),
+            "mounted": bool(after.mounted),
+            "health": after.health,
+            "healthy": healthy,
             "before": before.as_dict(),
             "after": after.as_dict(),
+            "script_exit_code": script_result.exit_code,
+            "script_stdout": redact_text(script_result.stdout),
+            "script_stderr": redact_text(script_result.stderr),
+        }
+    finally:
+        executor.close()
+
+
+def remount_mount(
+    reference: str,
+    path: str,
+    *,
+    environment: EnvironmentType,
+    ssh_port: int | None = None,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    settings = settings or get_settings()
+    safe_path = validate_mount_path(path)
+    target = resolve_target(reference, environment, ssh_port, settings=settings)
+    if target.environment not in _RECOVERY_ENVIRONMENTS:
+        raise MountOperationError("ambiente não autorizado para solicitação de remontagem")
+
+    executor = build_executor(target, settings=settings)
+    try:
+        executor.connect()
+        before = probe_mount(executor, target.environment, safe_path)
+        reason = _remount_block_reason(before, target.environment)
+        if reason:
+            raise MountOperationError(reason)
+
+        cron_user = str(before.cron_user or "")
+        _validate_cron_user(executor, target.environment, cron_user)
+
+        unmount_command = _unmount_execution_command(safe_path)
+        unmount_result = executor.run_sudo(
+            unmount_command,
+            target.environment,
+            approved=True,
+            timeout=40,
+        )
+        after_unmount = probe_mount(executor, target.environment, safe_path)
+        if unmount_result.exit_code != 0 or after_unmount.mounted:
+            return {
+                "operation": "mount_remount",
+                "target": reference,
+                "resolved_host": target.host,
+                "ssh_port": target.port,
+                "environment": target.environment.value,
+                "path": safe_path,
+                "script": MOUNT_RECOVERY_SCRIPT,
+                "execution_user": cron_user,
+                "status": "unmount_failed",
+                "mounted": bool(after_unmount.mounted),
+                "health": after_unmount.health,
+                "healthy": False,
+                "before": before.as_dict(),
+                "after_unmount": after_unmount.as_dict(),
+                "after": after_unmount.as_dict(),
+                "unmount_exit_code": unmount_result.exit_code,
+                "unmount_stdout": redact_text(unmount_result.stdout),
+                "unmount_stderr": redact_text(unmount_result.stderr),
+                "script_exit_code": None,
+                "script_stdout": "",
+                "script_stderr": "",
+            }
+
+        execution_command = _mount_execution_command(cron_user)
+        script_result = executor.run_sudo(
+            execution_command,
+            target.environment,
+            approved=True,
+            timeout=180,
+        )
+        after = probe_mount(executor, target.environment, safe_path)
+        healthy = bool(after.mounted and after.health == "healthy")
+        status = "remounted" if healthy else ("still_hanging" if after.mounted and after.health == "hanging" else "failed")
+        return {
+            "operation": "mount_remount",
+            "target": reference,
+            "resolved_host": target.host,
+            "ssh_port": target.port,
+            "environment": target.environment.value,
+            "path": safe_path,
+            "script": MOUNT_RECOVERY_SCRIPT,
+            "execution_user": cron_user,
+            "cron_source": before.cron_source,
+            "cron_schedule": before.cron_schedule,
+            "status": status,
+            "mounted": bool(after.mounted),
+            "health": after.health,
+            "healthy": healthy,
+            "before": before.as_dict(),
+            "after_unmount": after_unmount.as_dict(),
+            "after": after.as_dict(),
+            "unmount_exit_code": unmount_result.exit_code,
+            "unmount_stdout": redact_text(unmount_result.stdout),
+            "unmount_stderr": redact_text(unmount_result.stderr),
             "script_exit_code": script_result.exit_code,
             "script_stdout": redact_text(script_result.stdout),
             "script_stderr": redact_text(script_result.stderr),
