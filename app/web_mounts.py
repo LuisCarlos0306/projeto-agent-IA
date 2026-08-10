@@ -10,6 +10,7 @@ from app.core.policies import EnvironmentType
 from app.core.settings import get_settings
 from app.services.mount_jobs import (
     enqueue_mount_recovery,
+    enqueue_mount_remount,
     enqueue_mount_validation,
     get_mount_job,
 )
@@ -83,6 +84,30 @@ def request_mount_recovery(
         raise HTTPException(
             status_code=503,
             detail=f"não foi possível enfileirar a montagem: {type(exc).__name__}: {exc}",
+        ) from exc
+
+
+@router.post("/ui/api/mounts/remount")
+def request_mount_remount(
+    payload: MountRecoveryPayload,
+    request: Request,
+) -> dict[str, Any]:
+    _require_mutation(request)
+    if not payload.confirm:
+        raise HTTPException(status_code=422, detail="confirmação explícita é obrigatória")
+    try:
+        return enqueue_mount_remount(
+            payload.validation_job_id,
+            confirmed=True,
+            requested_by=_operator_name(),
+            settings=get_settings(),
+        )
+    except MountOperationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"não foi possível enfileirar a remontagem: {type(exc).__name__}: {exc}",
         ) from exc
 
 
