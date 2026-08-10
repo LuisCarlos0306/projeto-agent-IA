@@ -7,11 +7,14 @@ from datetime import datetime, timezone
 from typing import Any
 
 from redis import Redis
+from sqlalchemy import select
 
 from app.core.policies import EnvironmentType
 from app.core.settings import Settings, get_settings
+from app.db.base import SessionLocal
+from app.db.models import HostORM, InvestigationORM
 from app.services.mount_ops import MountOperationError, recover_mount, validate_mount
-from app.services.redaction import redact_object
+from app.services.redaction import redact_object, redact_text
 
 
 MOUNT_VALIDATION_JOB = "mount_validation"
@@ -151,13 +154,174 @@ def is_mount_job(job: dict[str, Any]) -> bool:
     return str(job.get("job_type") or "") in _MOUNT_JOB_TYPES
 
 
+def _duration_ms(started_at: datetime) -> int:
+    return max(0, int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000))
+
+
+def _mount_activity_document(
+    job_type: str,
+    result: dict[str, Any],
+    *,
+    duration_ms: int,
+) -> dict[str, Any]:
+    sanitized = redact_object(result)
+    safe_result = dict(sanitized) if isinstance(sanitized, dict) else {}
+    path = str(safe_result.get("path") or "").strip()
+    target = str(safe_result.get("target") or safe_result.get("resolved_host") or "").strip()
+    environment = str(safe_result.get("environment") or EnvironmentType.UNKNOWN.value)
+    mounted = bool(safe_result.get("mounted"))
+    after = safe_result.get("after") if isinstance(safe_result.get("after"), dict) else {}
+    source = safe_result.get("source") or after.get("source")
+    fstype = safe_result.get("fstype") or after.get("fstype")
+    cron_user = safe_result.get("cron_user") or safe_result.get("execution_user")
+    reason = str(safe_result.get("reason") or "").strip()
+
+    if job_type == MOUNT_RECOVERY_JOB:
+        title = "Montagem preventiva"
+        objective = f"Executar montagem preventiva e revalidar {path}"
+        summary = (
+            f"A montagem preventiva de {path} foi concluída e o ponto está montado."
+            if mounted
+            else f"O script de montagem foi executado, mas {path} permaneceu desmontado."
+        )
+        probable_cause = (
+            "Nenhuma falha de montagem permaneceu após a execução autorizada."
+            if mounted
+            else "A rotina padrão não restabeleceu o ponto de montagem; é necessária análise operacional."
+        )
+    else:
+        title = "Validação de mount"
+        objective = f"Validar ponto de montagem {path}"
+        summary = (
+            f"O ponto de montagem {path} foi validado como montado."
+            if mounted
+            else f"O ponto de montagem {path} foi validado como não montado."
+        )
+        probable_cause = (
+            "Nenhuma indisponibilidade de montagem foi identificada."
+            if mounted
+            else (reason or "O ponto de montagem não está ativo no momento da validação.")
+        )
+
+    status = "healthy" if mounted else "attention"
+    confidence = 100
+    facts = [
+        f"Ponto validado: {path}",
+        f"Estado observado: {'montado' if mounted else 'não montado'}",
+    ]
+    if source:
+        facts.append(f"Origem observada: {source}")
+    if fstype:
+        facts.append(f"Tipo de filesystem: {fstype}")
+    if cron_user:
+        facts.append(f"Usuário da rotina de montagem: {cron_user}")
+    if safe_result.get("cron_source"):
+        facts.append(f"Cron identificado em: {safe_result['cron_source']}")
+
+    recommendations: list[str] = []
+    if not mounted and safe_result.get("can_request_mount"):
+        recommendations.append("A montagem pode ser solicitada pela interface após confirmação humana.")
+    elif not mounted and reason:
+        recommendations.append(reason)
+
+    ticket_report = (
+        f"Validação de mount realizada no alvo {target}. Ponto {path}: "
+        f"{'MONTADO' if mounted else 'NÃO MONTADO'}."
+    )
+    if reason:
+        ticket_report += f" Observação: {reason}."
+
+    evidence = {
+        "type": job_type,
+        "status": "success",
+        "exit_code": 0,
+        "path": path,
+        "mounted": mounted,
+        "source": source,
+        "fstype": fstype,
+        "cron_user": cron_user,
+    }
+    analysis = {
+        "operation": job_type,
+        "status": status,
+        "confidence": confidence,
+        "summary": summary,
+        "probable_cause": probable_cause,
+        "conclusion": summary,
+        "facts": facts,
+        "recommendations": recommendations,
+        "ticket_report": ticket_report,
+        "mount_result": safe_result,
+        "deterministic_validation": True,
+    }
+    return {
+        "target": target,
+        "objective": objective,
+        "environment": environment,
+        "mode": "correct" if job_type == MOUNT_RECOVERY_JOB else "investigate",
+        "status": status,
+        "confidence": confidence,
+        "profile": "mount",
+        "model": "deterministic",
+        "duration_ms": max(0, int(duration_ms)),
+        "plans": [{"playbook": {"id": job_type.replace("_", "-"), "title": title}}],
+        "evidence": [evidence],
+        "assessments": [],
+        "analysis": analysis,
+        "diagnostics": [],
+    }
+
+
+def _persist_mount_activity(
+    job_type: str,
+    result: dict[str, Any],
+    *,
+    duration_ms: int,
+) -> str:
+    document = _mount_activity_document(job_type, result, duration_ms=duration_ms)
+    resolved_host = str(result.get("resolved_host") or document["target"] or "").strip()
+    hostname = None
+    if resolved_host:
+        with SessionLocal() as session:
+            host = session.scalar(
+                select(HostORM)
+                .where(HostORM.vpn_ip == resolved_host)
+                .order_by(HostORM.last_seen_at.desc())
+            )
+            hostname = host.hostname if host else None
+
+    with SessionLocal() as session:
+        row = InvestigationORM(
+            target=document["target"],
+            hostname=hostname,
+            objective=document["objective"],
+            environment=document["environment"],
+            mode=document["mode"],
+            status=document["status"],
+            confidence=document["confidence"],
+            profile=document["profile"],
+            model=document["model"],
+            duration_ms=document["duration_ms"],
+            plans=document["plans"],
+            evidence=document["evidence"],
+            assessments=document["assessments"],
+            analysis=document["analysis"],
+            diagnostics=document["diagnostics"],
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return str(row.id)
+
+
 def execute_mount_job(job: dict[str, Any], *, settings: Settings) -> dict[str, Any]:
     job_id = str(job.get("job_id") or "")
     if not job_id:
         raise MountOperationError("job de mount sem identificador")
     client = _redis(settings)
     worker = f"{settings.agent_worker_name}@{socket.gethostname()}"
-    started_at = _now()
+    started_clock = datetime.now(timezone.utc)
+    started_at = started_clock.isoformat()
     job_type = str(job.get("job_type") or "")
     running = {
         "job_id": job_id,
@@ -200,6 +364,21 @@ def execute_mount_job(job: dict[str, Any], *, settings: Settings) -> dict[str, A
             )
         else:
             raise MountOperationError(f"tipo de job de mount desconhecido: {job_type}")
+
+        result = dict(result)
+        try:
+            result["investigation_id"] = _persist_mount_activity(
+                job_type,
+                result,
+                duration_ms=_duration_ms(started_clock),
+            )
+            result["history_persisted"] = True
+        except Exception as persistence_exc:
+            result["history_persisted"] = False
+            result["history_warning"] = (
+                "A validação foi concluída, mas não foi possível registrar o histórico: "
+                f"{type(persistence_exc).__name__}: {redact_text(str(persistence_exc))}"
+            )
 
         completed_at = _now()
         payload = {
