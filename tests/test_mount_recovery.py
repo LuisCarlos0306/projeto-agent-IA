@@ -2,20 +2,39 @@ import pytest
 
 from app.core.policies import EnvironmentType
 from app.services.correction_policy import MOUNT_RECOVERY_SCRIPT, validate_correction
-from app.services.mount_ops import MountOperationError, probe_mount, validate_mount_path
+from app.services.mount_ops import (
+    MountOperationError,
+    _mount_execution_command,
+    probe_mount,
+    validate_mount_path,
+)
 from app.services.ssh import CommandResult, SSHExecutor
 
 
 class FakeExecutor:
-    def __init__(self, stdout: str, exit_code: int = 0, stderr: str = ""):
+    def __init__(
+        self,
+        stdout: str,
+        *,
+        sudo_stdout: str = "",
+        exit_code: int = 0,
+        sudo_exit_code: int = 0,
+        stderr: str = "",
+    ):
         self.stdout = stdout
+        self.sudo_stdout = sudo_stdout
         self.exit_code = exit_code
+        self.sudo_exit_code = sudo_exit_code
         self.stderr = stderr
         self.commands = []
 
     def run(self, command, environment, approved=False, timeout=60):
-        self.commands.append((command, environment, approved, timeout))
+        self.commands.append(("run", command, environment, approved, timeout))
         return CommandResult(command, self.exit_code, self.stdout, self.stderr)
+
+    def run_sudo(self, command, environment, approved=False, timeout=60):
+        self.commands.append(("sudo", command, environment, approved, timeout))
+        return CommandResult(command, self.sudo_exit_code, self.sudo_stdout, self.stderr)
 
 
 def test_mount_path_accepts_authorized_backup_prefix():
@@ -32,7 +51,30 @@ def test_mount_path_rejects_root_filesystem():
         validate_mount_path("/")
 
 
-def test_probe_reports_mounted_nfs_and_safe_script():
+def test_probe_accepts_mssql_owned_script_and_discovers_mssql_cron_user():
+    executor = FakeExecutor(
+        "\n".join(
+            [
+                "MOUNTED=0",
+                "SCRIPT_PRESENT=1",
+                "SCRIPT_META=mssql|mssql|755",
+            ]
+        ),
+        sudo_stdout="CRON_ENTRY=mssql|/var/spool/cron/mssql|*/5 * * * *\n",
+    )
+
+    result = probe_mount(executor, EnvironmentType.PRODUCTION, "/mnt/backup_nas_rman")
+
+    assert result.mounted is False
+    assert result.script_owner == "mssql"
+    assert result.script_group == "mssql"
+    assert result.script_safe is True
+    assert result.cron_found is True
+    assert result.cron_user == "mssql"
+    assert result.cron_ambiguous is False
+
+
+def test_probe_accepts_root_owned_script_and_discovers_root_cron_user():
     executor = FakeExecutor(
         "\n".join(
             [
@@ -40,9 +82,10 @@ def test_probe_reports_mounted_nfs_and_safe_script():
                 "FINDMNT=/mnt/backup_nas_rman 172.16.250.10:/BKP_FISICO nfs4 rw,relatime",
                 "DF=172.16.250.10:/BKP_FISICO 8.0T 4.0T 4.0T 50% /mnt/backup_nas_rman",
                 "SCRIPT_PRESENT=1",
-                "SCRIPT_META=root|755",
+                "SCRIPT_META=root|root|755",
             ]
-        )
+        ),
+        sudo_stdout="CRON_ENTRY=root|/var/spool/cron/root|*/5 * * * *\n",
     )
 
     result = probe_mount(executor, EnvironmentType.PRODUCTION, "/mnt/backup_nas_rman")
@@ -51,6 +94,7 @@ def test_probe_reports_mounted_nfs_and_safe_script():
     assert result.source == "172.16.250.10:/BKP_FISICO"
     assert result.fstype == "nfs4"
     assert result.script_safe is True
+    assert result.cron_user == "root"
 
 
 def test_probe_blocks_group_writable_mount_script():
@@ -59,30 +103,73 @@ def test_probe_blocks_group_writable_mount_script():
             [
                 "MOUNTED=0",
                 "SCRIPT_PRESENT=1",
-                "SCRIPT_META=root|775",
+                "SCRIPT_META=mssql|mssql|775",
             ]
-        )
+        ),
+        sudo_stdout="CRON_ENTRY=mssql|/var/spool/cron/mssql|*/5 * * * *\n",
     )
 
     result = probe_mount(executor, EnvironmentType.PRODUCTION, "/mnt/backup_nas_rman")
 
-    assert result.mounted is False
+    assert result.script_executable is True
     assert result.script_safe is False
 
 
-def test_correction_policy_allows_only_exact_mount_script():
-    allowed = validate_correction(MOUNT_RECOVERY_SCRIPT)
+def test_probe_marks_multiple_cron_users_as_ambiguous():
+    executor = FakeExecutor(
+        "MOUNTED=0\nSCRIPT_PRESENT=1\nSCRIPT_META=root|root|755\n",
+        sudo_stdout="\n".join(
+            [
+                "CRON_ENTRY=root|/var/spool/cron/root|*/5 * * * *",
+                "CRON_ENTRY=mssql|/var/spool/cron/mssql|*/10 * * * *",
+            ]
+        ),
+    )
+
+    result = probe_mount(executor, EnvironmentType.PRODUCTION, "/mnt/backup_nas_rman")
+
+    assert result.cron_found is True
+    assert result.cron_ambiguous is True
+    assert result.cron_user is None
+
+
+def test_execution_command_uses_discovered_cron_user():
+    assert _mount_execution_command("root") == MOUNT_RECOVERY_SCRIPT
+    assert _mount_execution_command("mssql") == f"sudo -u mssql -- {MOUNT_RECOVERY_SCRIPT}"
+    assert _mount_execution_command("oracle") == f"sudo -u oracle -- {MOUNT_RECOVERY_SCRIPT}"
+
+
+def test_correction_policy_allows_exact_script_and_safe_run_as_user():
+    direct = validate_correction(MOUNT_RECOVERY_SCRIPT)
+    as_mssql = validate_correction(f"sudo -u mssql -- {MOUNT_RECOVERY_SCRIPT}")
     altered = validate_correction(MOUNT_RECOVERY_SCRIPT + " --force")
 
-    assert allowed.allowed is True
-    assert allowed.action_type == "mount_recovery"
+    assert direct.allowed is True
+    assert direct.action_type == "mount_recovery"
+    assert as_mssql.allowed is True
+    assert as_mssql.action_type == "mount_recovery"
     assert altered.allowed is False
 
 
-def test_ssh_policy_accepts_exact_mount_script_after_explicit_approval():
+def test_ssh_policy_requires_explicit_approval_for_mount_in_production():
     executor = SSHExecutor("127.0.0.1", 22, "tester")
 
+    with pytest.raises(PermissionError):
+        executor._validate(MOUNT_RECOVERY_SCRIPT, EnvironmentType.PRODUCTION, approved=False)
+
     executor._validate(MOUNT_RECOVERY_SCRIPT, EnvironmentType.PRODUCTION, approved=True)
+    executor._validate(
+        f"sudo -u mssql -- {MOUNT_RECOVERY_SCRIPT}",
+        EnvironmentType.PRODUCTION,
+        approved=True,
+    )
+
+
+def test_ssh_policy_rejects_mount_in_unknown_environment():
+    executor = SSHExecutor("127.0.0.1", 22, "tester")
+
+    with pytest.raises(PermissionError):
+        executor._validate(MOUNT_RECOVERY_SCRIPT, EnvironmentType.UNKNOWN, approved=True)
 
 
 def test_ssh_policy_rejects_altered_mount_script_after_approval():
