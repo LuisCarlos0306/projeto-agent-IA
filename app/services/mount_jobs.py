@@ -13,13 +13,14 @@ from app.core.policies import EnvironmentType
 from app.core.settings import Settings, get_settings
 from app.db.base import SessionLocal
 from app.db.models import HostORM, InvestigationORM
-from app.services.mount_ops import MountOperationError, recover_mount, validate_mount
+from app.services.mount_ops import MountOperationError, recover_mount, remount_mount, validate_mount
 from app.services.redaction import redact_object, redact_text
 
 
 MOUNT_VALIDATION_JOB = "mount_validation"
 MOUNT_RECOVERY_JOB = "mount_recovery"
-_MOUNT_JOB_TYPES = {MOUNT_VALIDATION_JOB, MOUNT_RECOVERY_JOB}
+MOUNT_REMOUNT_JOB = "mount_remount"
+_MOUNT_JOB_TYPES = {MOUNT_VALIDATION_JOB, MOUNT_RECOVERY_JOB, MOUNT_REMOUNT_JOB}
 
 
 def _redis(settings: Settings) -> Redis:
@@ -104,11 +105,7 @@ def get_mount_job(job_id: str, *, settings: Settings | None = None) -> dict[str,
     return payload
 
 
-def _validated_request_source(
-    validation_job_id: str,
-    *,
-    settings: Settings,
-) -> dict[str, Any]:
+def _validation_result(validation_job_id: str, *, settings: Settings) -> dict[str, Any]:
     current = get_mount_job(validation_job_id, settings=settings)
     if not current or current.get("job_type") != MOUNT_VALIDATION_JOB:
         raise MountOperationError("validação de mount não encontrada")
@@ -117,10 +114,26 @@ def _validated_request_source(
     result = current.get("result")
     if not isinstance(result, dict):
         raise MountOperationError("resultado da validação de mount é inválido")
+    return result
+
+
+def _validated_request_source(validation_job_id: str, *, settings: Settings) -> dict[str, Any]:
+    result = _validation_result(validation_job_id, settings=settings)
     if result.get("mounted"):
         raise MountOperationError("a unidade já está montada")
     if not result.get("can_request_mount"):
         raise MountOperationError(str(result.get("reason") or "montagem não autorizada"))
+    return result
+
+
+def _validated_remount_source(validation_job_id: str, *, settings: Settings) -> dict[str, Any]:
+    result = _validation_result(validation_job_id, settings=settings)
+    if not result.get("mounted"):
+        raise MountOperationError("a unidade não está montada; use o fluxo de montagem")
+    if str(result.get("health") or "") != "hanging":
+        raise MountOperationError("a remontagem só pode ser solicitada após detecção de estado Hanging")
+    if not result.get("can_request_remount"):
+        raise MountOperationError(str(result.get("remount_reason") or "remontagem não autorizada"))
     return result
 
 
@@ -138,6 +151,32 @@ def enqueue_mount_recovery(
     payload = {
         "job_id": str(uuid.uuid4()),
         "job_type": MOUNT_RECOVERY_JOB,
+        "validation_job_id": validation_job_id,
+        "reference": str(source["target"]),
+        "path": str(source["path"]),
+        "environment": str(source["environment"]),
+        "ssh_port": int(source["ssh_port"]) if source.get("ssh_port") is not None else None,
+        "requested_by": requested_by,
+        "confirmed": True,
+        "created_at": _now(),
+    }
+    return _enqueue(payload, settings=settings)
+
+
+def enqueue_mount_remount(
+    validation_job_id: str,
+    *,
+    confirmed: bool,
+    requested_by: str | None = None,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    settings = settings or get_settings()
+    if not confirmed:
+        raise MountOperationError("confirmação explícita é obrigatória para solicitar a remontagem")
+    source = _validated_remount_source(validation_job_id, settings=settings)
+    payload = {
+        "job_id": str(uuid.uuid4()),
+        "job_type": MOUNT_REMOUNT_JOB,
         "validation_job_id": validation_job_id,
         "reference": str(source["target"]),
         "path": str(source["path"]),
@@ -175,40 +214,68 @@ def _mount_activity_document(
     fstype = safe_result.get("fstype") or after.get("fstype")
     cron_user = safe_result.get("cron_user") or safe_result.get("execution_user")
     reason = str(safe_result.get("reason") or "").strip()
+    health = str(safe_result.get("health") or after.get("health") or ("healthy" if mounted else "unmounted"))
+    usage_raw = safe_result.get("usage_percent")
+    if usage_raw is None:
+        usage_raw = after.get("usage_percent")
+    try:
+        usage_percent = int(usage_raw) if usage_raw is not None else None
+    except (TypeError, ValueError):
+        usage_percent = None
 
-    if job_type == MOUNT_RECOVERY_JOB:
+    healthy_mount = bool(mounted and health == "healthy")
+    capacity_attention = usage_percent is not None and usage_percent >= 90
+
+    if job_type == MOUNT_REMOUNT_JOB:
+        title = "Remontagem preventiva"
+        objective = f"Remontar ponto Hanging e revalidar {path}"
+        if healthy_mount:
+            summary = f"O ponto {path} foi desmontado sem force/lazy, montado novamente pelo script padrão e está saudável."
+            probable_cause = "O estado Hanging foi eliminado após a remontagem controlada."
+        elif mounted:
+            summary = f"O ponto {path} permanece montado, porém a saúde após a remontagem é {health}."
+            probable_cause = "A remontagem não restabeleceu resposta saudável do filesystem; é necessária análise operacional."
+        else:
+            summary = f"A remontagem de {path} não restabeleceu o ponto de montagem."
+            probable_cause = "A rotina controlada não restabeleceu o filesystem; é necessária análise operacional."
+    elif job_type == MOUNT_RECOVERY_JOB:
         title = "Montagem preventiva"
         objective = f"Executar montagem preventiva e revalidar {path}"
         summary = (
-            f"A montagem preventiva de {path} foi concluída e o ponto está montado."
-            if mounted
-            else f"O script de montagem foi executado, mas {path} permaneceu desmontado."
+            f"A montagem preventiva de {path} foi concluída e o ponto está saudável."
+            if healthy_mount
+            else f"A rotina de montagem foi executada, mas a saúde final de {path} é {health}."
         )
         probable_cause = (
             "Nenhuma falha de montagem permaneceu após a execução autorizada."
-            if mounted
-            else "A rotina padrão não restabeleceu o ponto de montagem; é necessária análise operacional."
+            if healthy_mount
+            else "A rotina padrão não restabeleceu um estado saudável; é necessária análise operacional."
         )
     else:
         title = "Validação de mount"
-        objective = f"Validar ponto de montagem {path}"
-        summary = (
-            f"O ponto de montagem {path} foi validado como montado."
-            if mounted
-            else f"O ponto de montagem {path} foi validado como não montado."
-        )
-        probable_cause = (
-            "Nenhuma indisponibilidade de montagem foi identificada."
-            if mounted
-            else (reason or "O ponto de montagem não está ativo no momento da validação.")
-        )
+        objective = f"Validar ponto de montagem e saúde de {path}"
+        if not mounted:
+            summary = f"O ponto de montagem {path} foi validado como não montado."
+            probable_cause = reason or "O ponto de montagem não está ativo no momento da validação."
+        elif health == "hanging":
+            summary = f"O ponto {path} consta como montado, mas a prova de acesso excedeu o timeout e foi classificado como Hanging."
+            probable_cause = "O filesystem está presente na tabela de mounts, porém não responde à prova de acesso dentro do tempo seguro."
+        elif health == "degraded":
+            summary = f"O ponto {path} consta como montado, mas a prova de acesso retornou estado degradado."
+            probable_cause = "O filesystem está montado, porém a validação funcional de acesso não foi concluída com sucesso."
+        else:
+            summary = f"O ponto de montagem {path} está montado e respondeu à prova de acesso."
+            probable_cause = "Nenhuma indisponibilidade de montagem foi identificada."
 
-    status = "healthy" if mounted else "attention"
+    status = "healthy" if healthy_mount and not capacity_attention else "attention"
     confidence = 100
     facts = [
         f"Ponto validado: {path}",
         f"Estado observado: {'montado' if mounted else 'não montado'}",
+        f"Saúde operacional: {health}",
     ]
+    if usage_percent is not None:
+        facts.append(f"Uso observado: {usage_percent}%")
     if source:
         facts.append(f"Origem observada: {source}")
     if fstype:
@@ -219,16 +286,22 @@ def _mount_activity_document(
         facts.append(f"Cron identificado em: {safe_result['cron_source']}")
 
     recommendations: list[str] = []
-    if not mounted and safe_result.get("can_request_mount"):
+    if health == "hanging" and safe_result.get("can_request_remount"):
+        recommendations.append("A remontagem controlada pode ser solicitada pela interface após confirmação humana.")
+    elif not mounted and safe_result.get("can_request_mount"):
         recommendations.append("A montagem pode ser solicitada pela interface após confirmação humana.")
     elif not mounted and reason:
         recommendations.append(reason)
+    if capacity_attention:
+        recommendations.append(f"Filesystem com {usage_percent}% de uso; avaliar capacidade e retenção de backup.")
 
     ticket_report = (
         f"Validação de mount realizada no alvo {target}. Ponto {path}: "
-        f"{'MONTADO' if mounted else 'NÃO MONTADO'}."
+        f"{'MONTADO' if mounted else 'NÃO MONTADO'}; saúde {health}."
     )
-    if reason:
+    if usage_percent is not None:
+        ticket_report += f" Uso: {usage_percent}%."
+    if reason and not mounted:
         ticket_report += f" Observação: {reason}."
 
     evidence = {
@@ -237,6 +310,8 @@ def _mount_activity_document(
         "exit_code": 0,
         "path": path,
         "mounted": mounted,
+        "health": health,
+        "usage_percent": usage_percent,
         "source": source,
         "fstype": fstype,
         "cron_user": cron_user,
@@ -258,7 +333,7 @@ def _mount_activity_document(
         "target": target,
         "objective": objective,
         "environment": environment,
-        "mode": "correct" if job_type == MOUNT_RECOVERY_JOB else "investigate",
+        "mode": "correct" if job_type in {MOUNT_RECOVERY_JOB, MOUNT_REMOUNT_JOB} else "investigate",
         "status": status,
         "confidence": confidence,
         "profile": "mount",
@@ -314,6 +389,22 @@ def _persist_mount_activity(
         return str(row.id)
 
 
+def _phase_detail(job_type: str) -> str:
+    if job_type == MOUNT_VALIDATION_JOB:
+        return "Validando mount e saúde da unidade."
+    if job_type == MOUNT_REMOUNT_JOB:
+        return "Executando remontagem Hanging autorizada."
+    return "Executando montagem autorizada."
+
+
+def _completed_detail(job_type: str) -> str:
+    if job_type == MOUNT_VALIDATION_JOB:
+        return "Validação e saúde concluídas."
+    if job_type == MOUNT_REMOUNT_JOB:
+        return "Solicitação de remontagem concluída."
+    return "Solicitação de montagem concluída."
+
+
 def execute_mount_job(job: dict[str, Any], *, settings: Settings) -> dict[str, Any]:
     job_id = str(job.get("job_id") or "")
     if not job_id:
@@ -332,9 +423,9 @@ def execute_mount_job(job: dict[str, Any], *, settings: Settings) -> dict[str, A
         "updated_at": started_at,
         "percent": 15,
         "current_phase": {
-            "stage": "mount_validation" if job_type == MOUNT_VALIDATION_JOB else "mount_recovery",
+            "stage": job_type,
             "status": "running",
-            "detail": "Validando unidade." if job_type == MOUNT_VALIDATION_JOB else "Executando montagem autorizada.",
+            "detail": _phase_detail(job_type),
             "percent": 15,
             "updated_at": started_at,
         },
@@ -358,6 +449,14 @@ def execute_mount_job(job: dict[str, Any], *, settings: Settings) -> dict[str, A
             if not bool(job.get("confirmed")):
                 raise MountOperationError("job de montagem sem confirmação explícita")
             result = recover_mount(
+                str(job.get("reference") or ""),
+                str(job.get("path") or ""),
+                **common,
+            )
+        elif job_type == MOUNT_REMOUNT_JOB:
+            if not bool(job.get("confirmed")):
+                raise MountOperationError("job de remontagem sem confirmação explícita")
+            result = remount_mount(
                 str(job.get("reference") or ""),
                 str(job.get("path") or ""),
                 **common,
@@ -391,7 +490,7 @@ def execute_mount_job(job: dict[str, Any], *, settings: Settings) -> dict[str, A
             "current_phase": {
                 "stage": job_type,
                 "status": "completed",
-                "detail": "Validação concluída." if job_type == MOUNT_VALIDATION_JOB else "Solicitação de montagem concluída.",
+                "detail": _completed_detail(job_type),
                 "percent": 100,
                 "updated_at": completed_at,
             },
