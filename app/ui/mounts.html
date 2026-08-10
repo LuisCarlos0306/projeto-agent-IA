@@ -26,19 +26,19 @@
       <div class="mount-page-head">
         <div>
           <p class="eyebrow">STORAGE / BACKUP</p>
-          <h1>Validação e montagem preventiva</h1>
+          <h1>Validação e saúde de mounts</h1>
         </div>
         <a class="secondary-button" href="/ui">Voltar</a>
       </div>
-      <p>Valide o ponto de montagem. Se a unidade estiver desmontada e o script padrão estiver seguro, o Agent IA oferecerá a opção de solicitar a montagem.</p>
+      <p>Valide montagem, resposta de acesso e uso do filesystem. Unidade desmontada pode receber opção de montagem; mount em estado Hanging pode receber opção controlada de desmontar e montar novamente.</p>
       <div class="mount-page-actions">
         <button id="topbar-start-investigation" class="mount-page-hidden-anchor" type="button" aria-hidden="true"></button>
       </div>
       <div class="mount-page-note">
-        A montagem executa exclusivamente <code>/db/backup/scripts/mount.sh</code>, somente após validação anterior e confirmação do operador. Depois da execução, o ponto de montagem é validado novamente.
+        A montagem usa exclusivamente <code>/db/backup/scripts/mount.sh</code>. A remontagem Hanging usa somente desmontagem normal temporizada, sem <code>-f</code> e sem <code>-l</code>, sempre após validação e confirmação do operador. A saúde é validada novamente ao final.
       </div>
     </section>
   </main>
-  <script src="/ui/assets/mount-recovery.js?v=1.30.17" defer></script>
+  <script src="/ui/assets/mount-recovery.js?v=1.30.17-hanging" defer></script>
 </body>
 </html>
