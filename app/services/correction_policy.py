@@ -11,6 +11,8 @@ class CorrectionDecision:
     action_type: str | None = None
 
 
+MOUNT_RECOVERY_SCRIPT = "/db/backup/scripts/mount.sh"
+
 ABSOLUTELY_FORBIDDEN = (
     " rm ", "rm -", "unlink ", "rmdir ", "delete ", "truncate ",
     "shutdown", "poweroff", "halt", "reboot", "init 0", "init 6",
@@ -67,14 +69,23 @@ def _allowed_system_unit(unit: str) -> bool:
 
 
 def validate_correction(command: str) -> CorrectionDecision:
-    """Autoriza somente recuperação controlada de componentes de monitoramento.
+    """Autoriza somente recuperações operacionais explicitamente controladas.
 
     A IA nunca pode parar, remover, apagar, editar, instalar, reiniciar host,
-    manipular banco de dados ou controlar o ciclo de vida de containers.
+    manipular banco de dados ou controlar o ciclo de vida de containers. A única
+    exceção de storage é a execução exata do script padrão de montagem, chamada
+    por um fluxo dedicado que exige validação anterior e confirmação humana.
     """
     stripped = command.strip()
     if not stripped:
         return CorrectionDecision(False, "comando vazio")
+
+    if stripped == MOUNT_RECOVERY_SCRIPT:
+        return CorrectionDecision(
+            True,
+            "script padrão de montagem autorizado por fluxo dedicado",
+            "mount_recovery",
+        )
 
     forbidden = _contains_forbidden(stripped)
     if forbidden:
