@@ -29,6 +29,7 @@ from app.web_observability import router as observability_router
 from app.web_operator_experience import router as operator_experience_router
 from app.web_playbooks import router as playbooks_router
 from app.web_replay import router as replay_router
+from app.web_runtime_health import router as runtime_health_router
 from app.web_settings import enable_dynamic_provider_payload, router as settings_router
 from app.web_skills import router as skills_router
 from app.web_tools import router as tools_router
@@ -60,6 +61,9 @@ if not getattr(app.state, "agent_ui_playbooks_registered", False):
 if not getattr(app.state, "agent_ui_skills_registered", False):
     app.include_router(skills_router)
     app.state.agent_ui_skills_registered = True
+if not getattr(app.state, "agent_ui_runtime_health_registered", False):
+    app.include_router(runtime_health_router)
+    app.state.agent_ui_runtime_health_registered = True
 if not getattr(app.state, "agent_ui_flow_registered", False):
     app.include_router(flow_router)
     app.state.agent_ui_flow_registered = True
