@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="/ui/assets/fast-validation-ui.css?v=1.30.13">
   <link rel="stylesheet" href="/ui/assets/investigation-confidence.css?v=1.30.13">
   <link rel="stylesheet" href="/ui/assets/cyber-theme.css?v=1.30.13">
+  <link rel="stylesheet" href="/ui/assets/skills.css?v=1.0.0">
 </head>
 <body data-agent-ui-version="1.30.13">
   <div class="app-shell">
@@ -49,6 +50,7 @@
         <button class="nav-item" data-view="investigations"><span class="nav-icon">◎</span><span>Investigações</span></button>
         <button class="nav-item" data-view="inventory"><span class="nav-icon">▦</span><span>Inventário</span></button>
         <button class="nav-item" data-view="playbooks"><span class="nav-icon">◇</span><span>Playbooks</span></button>
+        <button class="nav-item" data-view="skills"><span class="nav-icon">✦</span><span>Skills</span></button>
         <button class="nav-item" data-view="opencode"><span class="nav-icon">⌘</span><span>OpenCode</span></button>
         <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span><span>Configurações</span></button>
         <button class="nav-item" data-view="health"><span class="nav-icon">♥</span><span>Saúde</span></button>
@@ -89,6 +91,19 @@
           </div>
           <div class="playbook-grid" id="playbook-grid"><div class="empty-state">Abra esta seção para carregar os playbooks.</div></div>
         </article>
+      </section>
+
+      <section class="view" id="view-skills">
+        <div class="skills-layout">
+          <article class="panel">
+            <div class="panel-header stacked-mobile">
+              <div><p class="eyebrow">CAPACIDADES DO AGENTE</p><h3>Skills configuradas</h3><p>Catálogo controlado de capacidades, permissões e dependências disponíveis para o Agent IA.</p></div>
+              <span class="mode-badge">catálogo local · somente leitura</span>
+            </div>
+            <div class="skills-grid" id="skills-grid"><div class="skills-empty">Abra esta seção para carregar as skills.</div></div>
+          </article>
+          <article class="panel skill-detail-panel" id="skill-detail" hidden></article>
+        </div>
       </section>
 
       <section class="view" id="view-opencode"><article class="panel"><div class="panel-header"><div><p class="eyebrow">AGENTE DE DESENVOLVIMENTO</p><h3>OpenCode integrado ao Agent IA</h3></div></div><div class="opencode-workspace" id="opencode-workspace"><div class="empty-state">Abra esta seção para usar o OpenCode.</div></div></article></section>
@@ -168,5 +183,6 @@
   <script src="/ui/assets/recovery-flow.js?v=1.29.0" defer></script>
   <script src="/ui/assets/fast-validation-ui.js?v=1.30.13" defer></script>
   <script src="/ui/assets/investigation-confidence.js?v=1.30.13" defer></script>
+  <script src="/ui/assets/skills.js?v=1.0.0" defer></script>
 </body>
 </html>

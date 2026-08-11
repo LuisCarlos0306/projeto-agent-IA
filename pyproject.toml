@@ -20,4 +20,4 @@ agent-opencode-web = "app.services.opencode_cli:web_main"
 include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["ui/*.html", "ui/*.css", "ui/*.js"]
+app = ["ui/*.html", "ui/*.css", "ui/*.js", "ui/*.json"]
