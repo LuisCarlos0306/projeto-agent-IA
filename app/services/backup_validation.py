@@ -34,6 +34,12 @@ def _optional_path(value: str | None, field: str) -> str | None:
     return _safe_path(raw, field) if raw else None
 
 
+def _is_inside(path: str, parent: str) -> bool:
+    if parent == "/":
+        return path.startswith("/")
+    return path == parent or path.startswith(parent.rstrip("/") + "/")
+
+
 def _command(command: str) -> str:
     allowed, reason, _spec = validate_command(command)
     if not allowed:
@@ -42,12 +48,7 @@ def _command(command: str) -> str:
 
 
 def _status(label: str, status: str, detail: str, **extra: Any) -> dict[str, Any]:
-    return {
-        "label": label,
-        "status": status,
-        "detail": detail,
-        **extra,
-    }
+    return {"label": label, "status": status, "detail": detail, **extra}
 
 
 def _parse_mount(stdout: str) -> dict[str, str] | None:
@@ -119,6 +120,24 @@ def _overall(checks: dict[str, dict[str, Any]]) -> str:
     return "inconclusive"
 
 
+def _latest_command(path: str) -> str:
+    quoted = shlex.quote(path)
+    return _command(
+        f"find {quoted} -maxdepth 2 -type f -printf '%T@|%s|%p\\n' | sort -t'|' -k1,1nr | head -n 1"
+    )
+
+
+def _action_for_mount_failure() -> dict[str, Any]:
+    return {
+        "id": "execute_mount_script",
+        "label": "Solicitar montagem",
+        "command": MOUNT_SCRIPT,
+        "risk": "approval_required",
+        "enabled": False,
+        "detail": "A execução do script permanece bloqueada até a etapa de aprovação operacional da skill.",
+    }
+
+
 def run_backup_validation(
     reference: str,
     *,
@@ -137,6 +156,9 @@ def run_backup_validation(
     mount_point = _safe_path(mount_point, "ponto de montagem")
     backup_path = _safe_path(backup_path, "diretório do backup")
     redundancy_path = _optional_path(redundancy_path, "diretório de redundância")
+    if not _is_inside(backup_path, mount_point):
+        raise ValueError("o diretório do backup deve estar dentro do ponto de montagem informado")
+
     min_free_percent = max(1, min(99, int(min_free_percent)))
     max_backup_age_hours = max(1, min(24 * 90, int(max_backup_age_hours)))
     retention_days = max(1, min(365, int(retention_days)))
@@ -166,7 +188,6 @@ def run_backup_validation(
 
         q_mount = shlex.quote(mount_point)
         q_backup = shlex.quote(backup_path)
-
         mount_result = executor.run(
             _command(f"findmnt -rn -M {q_mount} -o SOURCE,TARGET,FSTYPE,OPTIONS"),
             target.environment,
@@ -175,12 +196,7 @@ def run_backup_validation(
         )
         mount_info = _parse_mount(mount_result.stdout) if mount_result.exit_code == 0 else None
         if mount_info:
-            checks["mount"] = _status(
-                "Montagem",
-                "healthy",
-                f"{mount_point} está montado.",
-                **mount_info,
-            )
+            checks["mount"] = _status("Montagem", "healthy", f"{mount_point} está montado.", **mount_info)
         else:
             checks["mount"] = _status(
                 "Montagem",
@@ -195,14 +211,15 @@ def run_backup_validation(
             approved=False,
             timeout=20,
         )
-        if stat_result.exit_code == 0 and stat_result.stdout.strip():
+        path_accessible = stat_result.exit_code == 0 and bool(stat_result.stdout.strip())
+        if path_accessible:
             stat_parts = stat_result.stdout.strip().split("|", 2)
             fs_type = stat_parts[0] if stat_parts else "desconhecido"
             fs_status = "healthy" if mount_info else "critical"
             detail = (
                 f"Filesystem acessível em {backup_path} ({fs_type})."
                 if mount_info
-                else f"O caminho {backup_path} responde, mas o ponto {mount_point} não está montado; pode estar usando o filesystem local."
+                else f"O caminho {backup_path} responde, mas {mount_point} está desmontado; a skill não aceitará esse conteúdo como backup válido."
             )
             checks["filesystem"] = _status("Filesystem", fs_status, detail, fstype=fs_type, path=backup_path)
         else:
@@ -238,109 +255,119 @@ def run_backup_validation(
             checks["space"] = _status(
                 "Espaço livre",
                 "inconclusive",
-                "Validação de espaço ignorada enquanto a unidade estiver desmontada.",
+                "Validação ignorada para evitar medir o filesystem local com a unidade desmontada.",
             )
 
-        recent_count_result = executor.run(
-            _command(
-                f"find {q_backup} -maxdepth 2 -type f -newermt '-{retention_days} days' -printf '.' | wc -c"
-            ),
-            target.environment,
-            approved=False,
-            timeout=30,
-        )
-        try:
-            recent_count = int(recent_count_result.stdout.strip()) if recent_count_result.exit_code == 0 else 0
-        except ValueError:
-            recent_count = 0
-        retention_status = "healthy" if recent_count >= min_restore_points else "attention"
-        checks["retention"] = _status(
-            "Retenção",
-            retention_status,
-            (
-                f"{recent_count} arquivo(s) recente(s) encontrado(s) nos últimos {retention_days} dia(s); "
-                f"mínimo configurado: {min_restore_points}."
-            ),
-            recent_files=recent_count,
-            retention_days=retention_days,
-            minimum_expected=min_restore_points,
-            note="Validação genérica por quantidade de arquivos recentes; políticas por posição podem ser especializadas por cliente.",
-        )
-
-        latest_result = executor.run(
-            _command(
-                f"find {q_backup} -maxdepth 2 -type f -printf '%T@|%s|%p\\n' | sort -t'|' -k1,1nr | head -n 1"
-            ),
-            target.environment,
-            approved=False,
-            timeout=30,
-        )
-        latest = _parse_latest(latest_result.stdout) if latest_result.exit_code == 0 else None
-        if latest:
-            age = float(latest["age_hours"])
-            latest_status = "healthy" if age <= max_backup_age_hours else "critical"
+        if not mount_info:
+            checks["retention"] = _status(
+                "Retenção",
+                "inconclusive",
+                "Validação não executada porque a unidade de backup está desmontada.",
+            )
             checks["last_backup"] = _status(
                 "Último backup",
-                latest_status,
-                f"Último arquivo possui {age:.1f}h; limite configurado: {max_backup_age_hours}h.",
-                maximum_age_hours=max_backup_age_hours,
-                **latest,
+                "inconclusive",
+                "Validação não executada porque a unidade de backup está desmontada.",
+            )
+            checks["redundancy"] = _status(
+                "Redundância",
+                "inconclusive",
+                "Validação não executada nesta etapa porque a origem principal está desmontada.",
+            )
+        elif not path_accessible:
+            checks["retention"] = _status("Retenção", "inconclusive", "Diretório principal do backup não está acessível.")
+            checks["last_backup"] = _status("Último backup", "critical", "Diretório principal do backup não está acessível.")
+            checks["redundancy"] = _status(
+                "Redundância",
+                "inconclusive",
+                "Validação adiada enquanto o diretório principal do backup estiver inacessível.",
             )
         else:
-            checks["last_backup"] = _status(
-                "Último backup",
-                "critical",
-                f"Nenhum arquivo de backup foi encontrado em {backup_path}.",
-                path=backup_path,
-            )
-
-        if redundancy_path:
-            q_redundancy = shlex.quote(redundancy_path)
-            redundancy_result = executor.run(
+            recent_count_result = executor.run(
                 _command(
-                    f"find {q_redundancy} -maxdepth 2 -type f -printf '%T@|%s|%p\\n' | sort -t'|' -k1,1nr | head -n 1"
+                    f"find {q_backup} -maxdepth 2 -type f -newermt '-{retention_days} days' -printf '.' | wc -c"
                 ),
                 target.environment,
                 approved=False,
                 timeout=30,
             )
-            redundancy = _parse_latest(redundancy_result.stdout) if redundancy_result.exit_code == 0 else None
-            if redundancy:
-                age = float(redundancy["age_hours"])
-                redundancy_status = "healthy" if age <= max_backup_age_hours else "attention"
-                checks["redundancy"] = _status(
-                    "Redundância",
-                    redundancy_status,
-                    f"Cópia redundante mais recente possui {age:.1f}h.",
+            try:
+                recent_count = int(recent_count_result.stdout.strip()) if recent_count_result.exit_code == 0 else 0
+            except ValueError:
+                recent_count = 0
+            retention_status = "healthy" if recent_count >= min_restore_points else "attention"
+            checks["retention"] = _status(
+                "Retenção",
+                retention_status,
+                (
+                    f"{recent_count} arquivo(s) recente(s) encontrado(s) nos últimos {retention_days} dia(s); "
+                    f"mínimo configurado: {min_restore_points}."
+                ),
+                recent_files=recent_count,
+                retention_days=retention_days,
+                minimum_expected=min_restore_points,
+                note="Validação genérica por quantidade de arquivos recentes; políticas por posição podem ser especializadas por cliente.",
+            )
+
+            latest_result = executor.run(
+                _latest_command(backup_path),
+                target.environment,
+                approved=False,
+                timeout=30,
+            )
+            latest = _parse_latest(latest_result.stdout) if latest_result.exit_code == 0 else None
+            if latest:
+                age = float(latest["age_hours"])
+                latest_status = "healthy" if age <= max_backup_age_hours else "critical"
+                checks["last_backup"] = _status(
+                    "Último backup",
+                    latest_status,
+                    f"Último arquivo possui {age:.1f}h; limite configurado: {max_backup_age_hours}h.",
                     maximum_age_hours=max_backup_age_hours,
-                    **redundancy,
+                    **latest,
                 )
+            else:
+                checks["last_backup"] = _status(
+                    "Último backup",
+                    "critical",
+                    f"Nenhum arquivo de backup foi encontrado em {backup_path}.",
+                    path=backup_path,
+                )
+
+            if redundancy_path:
+                redundancy_result = executor.run(
+                    _latest_command(redundancy_path),
+                    target.environment,
+                    approved=False,
+                    timeout=30,
+                )
+                redundancy = _parse_latest(redundancy_result.stdout) if redundancy_result.exit_code == 0 else None
+                if redundancy:
+                    age = float(redundancy["age_hours"])
+                    redundancy_status = "healthy" if age <= max_backup_age_hours else "attention"
+                    checks["redundancy"] = _status(
+                        "Redundância",
+                        redundancy_status,
+                        f"Cópia redundante mais recente possui {age:.1f}h.",
+                        maximum_age_hours=max_backup_age_hours,
+                        **redundancy,
+                    )
+                else:
+                    checks["redundancy"] = _status(
+                        "Redundância",
+                        "attention",
+                        f"Nenhum arquivo foi encontrado em {redundancy_path}.",
+                        path=redundancy_path,
+                    )
             else:
                 checks["redundancy"] = _status(
                     "Redundância",
-                    "attention",
-                    f"Nenhum arquivo foi encontrado em {redundancy_path}.",
-                    path=redundancy_path,
+                    "inconclusive",
+                    "Diretório de redundância não informado para esta execução.",
                 )
-        else:
-            checks["redundancy"] = _status(
-                "Redundância",
-                "inconclusive",
-                "Diretório de redundância não informado para esta execução.",
-            )
 
         overall = _overall(checks)
-        action_available = None
-        if checks["mount"]["status"] == "critical":
-            action_available = {
-                "id": "execute_mount_script",
-                "label": "Solicitar montagem",
-                "command": MOUNT_SCRIPT,
-                "risk": "approval_required",
-                "enabled": False,
-                "detail": "A execução do script permanece bloqueada até a etapa de aprovação operacional da skill.",
-            }
-
+        action_available = _action_for_mount_failure() if checks["mount"]["status"] == "critical" else None
         result = {
             "skill": "backup_validation",
             "version": "1.1.0",
