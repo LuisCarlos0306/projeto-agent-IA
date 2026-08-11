@@ -30,6 +30,7 @@ from app.web_operator_experience import router as operator_experience_router
 from app.web_playbooks import router as playbooks_router
 from app.web_replay import router as replay_router
 from app.web_settings import enable_dynamic_provider_payload, router as settings_router
+from app.web_skills import router as skills_router
 from app.web_tools import router as tools_router
 from app.web_topology import router as topology_router
 from app.web_ui_cache import router as ui_cache_router
@@ -56,6 +57,9 @@ if not getattr(app.state, "agent_ui_executions_registered", False):
 if not getattr(app.state, "agent_ui_playbooks_registered", False):
     app.include_router(playbooks_router)
     app.state.agent_ui_playbooks_registered = True
+if not getattr(app.state, "agent_ui_skills_registered", False):
+    app.include_router(skills_router)
+    app.state.agent_ui_skills_registered = True
 if not getattr(app.state, "agent_ui_flow_registered", False):
     app.include_router(flow_router)
     app.state.agent_ui_flow_registered = True
