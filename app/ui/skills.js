@@ -30,6 +30,8 @@
       .replaceAll("'", "&#039;");
   }
 
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
   async function fetchCatalog() {
     if (catalog) return catalog;
     const response = await fetch("/ui/assets/skills-catalog.json?v=1.1.0", { cache: "no-store" });
@@ -227,11 +229,25 @@
     element.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
-  function renderRunning() {
+  function renderRunning(detail = "Conectando ao alvo e executando apenas consultas permitidas.", percent = null) {
     const element = document.querySelector("#backup-validation-result");
     if (!element) return;
+    const percentText = Number.isFinite(Number(percent)) ? `<span class="skill-running-percent">${safe(percent)}%</span>` : "";
     element.hidden = false;
-    element.innerHTML = '<div class="skill-running"><span class="skill-running-spinner"></span><div><strong>Validando backup...</strong><p>Conectando ao alvo e executando apenas consultas permitidas.</p></div></div>';
+    element.innerHTML = `<div class="skill-running"><span class="skill-running-spinner"></span><div><strong>Validando backup...</strong><p>${safe(detail)}</p></div>${percentText}</div>`;
+  }
+
+  async function pollSkillJob(jobId) {
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      await sleep(1000);
+      const job = await requestJson(`/ui/api/skills/jobs/${encodeURIComponent(jobId)}`);
+      if (job.status === "completed") return job.result || {};
+      if (job.status === "failed") throw new Error(job.error || "Worker não concluiu a validação.");
+      if (job.status === "cancelled") throw new Error("Validação cancelada.");
+      const phase = job.current_phase || {};
+      renderRunning(phase.detail || "Aguardando worker operacional.", job.percent);
+    }
+    throw new Error("A validação excedeu o tempo máximo de acompanhamento da interface.");
   }
 
   async function submitBackupValidation(form) {
@@ -258,7 +274,10 @@
     renderRunning();
     try {
       const response = await requestJson("/ui/api/skills/backup-validation/run", { method: "POST", body });
-      renderValidationResult(response.result || response);
+      const result = response.status === "completed"
+        ? (response.result || response)
+        : await pollSkillJob(response.job_id);
+      renderValidationResult(result);
     } catch (error) {
       const element = document.querySelector("#backup-validation-result");
       if (element) {
