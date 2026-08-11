@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "catalog_version": "1.1.0",
+  "catalog_version": "1.2.0",
   "skills": [
     {
       "id": "backup_validation",
       "display_name": "Backup Validation",
-      "description": "Validação executável e controlada de filesystem, montagem, espaço, retenção, último backup e redundância.",
+      "description": "Validação executável com descoberta automática do filesystem principal e da unidade de redundância.",
       "category": "Backup",
       "status": "active",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "scope": "Servidores de backup",
       "mode": "diagnostic_first",
       "dependencies": {
@@ -19,7 +19,7 @@
         {
           "id": "validate_filesystem",
           "label": "Validar filesystem",
-          "description": "Verifica o filesystem associado ao armazenamento de backup.",
+          "description": "Descobre e verifica automaticamente o filesystem que sustenta o diretório de backup.",
           "type": "query",
           "risk": "read_only",
           "enabled": true
@@ -27,7 +27,7 @@
         {
           "id": "validate_mount",
           "label": "Validar montagem",
-          "description": "Confirma se a unidade esperada está montada como ponto dedicado.",
+          "description": "Compara a topologia montada com os mounts configurados e detecta underlay quando uma unidade esperada está desmontada.",
           "type": "query",
           "risk": "read_only",
           "enabled": true
@@ -35,7 +35,7 @@
         {
           "id": "validate_space",
           "label": "Validar espaço",
-          "description": "Verifica utilização e espaço livre do filesystem montado.",
+          "description": "Verifica utilização e espaço livre do filesystem principal descoberto.",
           "type": "query",
           "risk": "read_only",
           "enabled": true
@@ -58,8 +58,8 @@
         },
         {
           "id": "validate_redundancy",
-          "label": "Validar redundância",
-          "description": "Verifica a presença e idade da cópia redundante quando um diretório é informado.",
+          "label": "Descobrir e validar redundância",
+          "description": "Identifica automaticamente candidatos NFS, CIFS, NAS, storage ou HD externo e valida a cópia mais recente.",
           "type": "query",
           "risk": "read_only",
           "enabled": true
