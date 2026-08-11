@@ -12,7 +12,7 @@ def test_skill_catalog_loads_backup_validation():
     catalog = load_skill_catalog()
 
     assert catalog["schema_version"] == 1
-    assert catalog["catalog_version"] == "1.0.0"
+    assert catalog["catalog_version"] == "1.1.0"
     assert any(skill["id"] == "backup_validation" for skill in catalog["skills"])
 
 
@@ -36,6 +36,7 @@ def test_mount_script_is_registered_but_not_enabled():
     action = get_skill_action("backup_validation", "execute_mount_script")
 
     assert skill is not None
+    assert skill["version"] == "1.1.0"
     assert "/db/backup/scripts/mount.sh" in skill["dependencies"]["scripts"]
     assert action is not None
     assert action["command"] == "/db/backup/scripts/mount.sh"
