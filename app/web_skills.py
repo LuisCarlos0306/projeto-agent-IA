@@ -52,8 +52,12 @@ def skill_runtime_status(request: Request) -> dict[str, Any]:
 def execute_backup_validation(payload: BackupValidationPayload, request: Request) -> dict[str, Any]:
     _require_mutation(request)
     settings = get_settings()
+    # mount_point/redundancy_path vazios preservam o contrato do worker 1.1.x;
+    # run_backup_validation 1.2 ignora ambos e descobre a topologia no alvo.
     common = {
+        "mount_point": "",
         "backup_path": payload.backup_path,
+        "redundancy_path": None,
         "environment": payload.environment,
         "ssh_port": payload.ssh_port,
         "min_free_percent": payload.min_free_percent,
