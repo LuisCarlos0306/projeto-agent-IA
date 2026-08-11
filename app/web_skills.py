@@ -19,8 +19,10 @@ class BackupValidationPayload(BaseModel):
     target: str = Field(min_length=1, max_length=255)
     environment: EnvironmentType = EnvironmentType.UNKNOWN
     ssh_port: int | None = Field(default=None, ge=1, le=65535)
-    mount_point: str = Field(min_length=1, max_length=1024)
     backup_path: str = Field(min_length=1, max_length=1024)
+    # Compatibilidade com clientes 1.1.x: estes campos são aceitos, mas a
+    # descoberta do servidor é soberana e não usa valores manuais de mount.
+    mount_point: str | None = Field(default=None, max_length=1024)
     redundancy_path: str | None = Field(default=None, max_length=1024)
     min_free_percent: int = Field(default=20, ge=1, le=99)
     max_backup_age_hours: int = Field(default=30, ge=1, le=2160)
@@ -36,9 +38,10 @@ def skill_runtime_status(request: Request) -> dict[str, Any]:
         "skills": {
             "backup_validation": {
                 "status": "active",
-                "version": "1.1.0",
+                "version": "1.2.0",
                 "execution": "read_only",
                 "execution_mode": settings.agent_execution_mode,
+                "storage_discovery": "automatic",
                 "mount_action": "approval_required_disabled",
             }
         }
@@ -49,10 +52,12 @@ def skill_runtime_status(request: Request) -> dict[str, Any]:
 def execute_backup_validation(payload: BackupValidationPayload, request: Request) -> dict[str, Any]:
     _require_mutation(request)
     settings = get_settings()
+    # mount_point/redundancy_path vazios preservam o contrato do worker 1.1.x;
+    # run_backup_validation 1.2 ignora ambos e descobre a topologia no alvo.
     common = {
-        "mount_point": payload.mount_point,
+        "mount_point": "",
         "backup_path": payload.backup_path,
-        "redundancy_path": payload.redundancy_path,
+        "redundancy_path": None,
         "environment": payload.environment,
         "ssh_port": payload.ssh_port,
         "min_free_percent": payload.min_free_percent,
