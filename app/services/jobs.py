@@ -11,6 +11,7 @@ from redis import Redis
 
 from app.core.policies import EnvironmentType
 from app.core.settings import Settings, get_settings
+from app.services.backup_validation import run_backup_validation
 from app.services.cancellation import ExecutionCancelled, raise_if_cancelled, use_cancellation
 from app.services.progress import use_progress
 from app.services.redaction import redact_object
@@ -80,6 +81,7 @@ def enqueue_investigation(
     }
     job = {
         "job_id": job_id,
+        "job_type": "investigation",
         "reference": reference,
         "objective": objective,
         "environment": environment.value,
@@ -93,6 +95,7 @@ def enqueue_investigation(
     client = _redis(settings)
     queued = {
         "job_id": job_id,
+        "job_type": "investigation",
         "status": "queued",
         "created_at": job["created_at"],
         "percent": 0,
@@ -106,6 +109,70 @@ def enqueue_investigation(
         "events": [],
         **selection,
     }
+    _store(client, settings, job_id, queued)
+    client.rpush(settings.agent_queue_name, json.dumps(job, ensure_ascii=False, default=str))
+    return {
+        **queued,
+        "queue": settings.agent_queue_name,
+        "worker_pool": settings.agent_worker_name,
+    }
+
+
+def enqueue_backup_validation(
+    reference: str,
+    *,
+    mount_point: str,
+    backup_path: str,
+    redundancy_path: str | None = None,
+    environment: EnvironmentType = EnvironmentType.UNKNOWN,
+    ssh_port: int | None = None,
+    min_free_percent: int = 20,
+    max_backup_age_hours: int = 30,
+    retention_days: int = 7,
+    min_restore_points: int = 1,
+    metadata: dict[str, Any] | None = None,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    settings = settings or get_settings()
+    job_id = str(uuid.uuid4())
+    created_at = _now()
+    skill_payload = {
+        "mount_point": mount_point,
+        "backup_path": backup_path,
+        "redundancy_path": redundancy_path,
+        "min_free_percent": int(min_free_percent),
+        "max_backup_age_hours": int(max_backup_age_hours),
+        "retention_days": int(retention_days),
+        "min_restore_points": int(min_restore_points),
+    }
+    job = {
+        "job_id": job_id,
+        "job_type": "skill",
+        "skill": "backup_validation",
+        "reference": reference,
+        "environment": environment.value,
+        "ssh_port": ssh_port,
+        "skill_payload": skill_payload,
+        "metadata": redact_object(metadata or {}),
+        "created_at": created_at,
+    }
+    queued = {
+        "job_id": job_id,
+        "job_type": "skill",
+        "skill": "backup_validation",
+        "status": "queued",
+        "created_at": created_at,
+        "percent": 0,
+        "current_phase": {
+            "stage": "worker_wait",
+            "status": "running",
+            "detail": "Aguardando worker operacional para executar a Backup Validation.",
+            "percent": 0,
+            "updated_at": created_at,
+        },
+        "events": [],
+    }
+    client = _redis(settings)
     _store(client, settings, job_id, queued)
     client.rpush(settings.agent_queue_name, json.dumps(job, ensure_ascii=False, default=str))
     return {
@@ -215,12 +282,17 @@ def _execute_job(job: dict[str, Any], *, settings: Settings) -> dict[str, Any]:
     job_id = str(job["job_id"])
     client = _redis(settings)
     worker = f"{settings.agent_worker_name}@{socket.gethostname()}"
+    job_type = str(job.get("job_type") or "investigation")
+    skill = str(job.get("skill") or "")
     selection = {
         "provider": str(job.get("provider") or _default_provider(settings)),
         "model": str(job.get("model") or ""),
         "playbook_mode": str(job.get("playbook_mode") or "auto"),
         "playbook_id": job.get("playbook_id"),
     }
+    job_identity = {"job_type": job_type}
+    if skill:
+        job_identity["skill"] = skill
     started_at = _now()
     _store(
         client,
@@ -228,13 +300,14 @@ def _execute_job(job: dict[str, Any], *, settings: Settings) -> dict[str, Any]:
         job_id,
         {
             "job_id": job_id,
+            **job_identity,
             "status": "running",
             "worker": worker,
             "started_at": started_at,
             "updated_at": started_at,
             "percent": 4,
             "events": [],
-            **selection,
+            **({} if job_type == "skill" else selection),
         },
     )
     try:
@@ -243,31 +316,50 @@ def _execute_job(job: dict[str, Any], *, settings: Settings) -> dict[str, Any]:
             lambda: job_cancel_requested(job_id, settings=settings)
         ):
             raise_if_cancelled("Job cancelado antes de iniciar a coleta.")
-            result = run_target_tracked(
-                str(job["reference"]),
-                str(job.get("objective") or ""),
-                environment=environment,
-                mode=str(job.get("mode") or "propose"),
-                approve=bool(job.get("approve", False)),
-                ssh_port=job.get("ssh_port"),
-                provider_name=selection["provider"],
-                model_name=selection["model"] or None,
-                playbook_mode=selection["playbook_mode"],
-                playbook_id=selection["playbook_id"],
-                settings=settings,
-            )
+            if job_type == "skill":
+                if skill != "backup_validation":
+                    raise JobError(f"skill de worker não suportada: {skill or 'não informada'}")
+                skill_payload = dict(job.get("skill_payload") or {})
+                result = run_backup_validation(
+                    str(job["reference"]),
+                    mount_point=str(skill_payload.get("mount_point") or ""),
+                    backup_path=str(skill_payload.get("backup_path") or ""),
+                    redundancy_path=skill_payload.get("redundancy_path"),
+                    environment=environment,
+                    ssh_port=job.get("ssh_port"),
+                    min_free_percent=int(skill_payload.get("min_free_percent") or 20),
+                    max_backup_age_hours=int(skill_payload.get("max_backup_age_hours") or 30),
+                    retention_days=int(skill_payload.get("retention_days") or 7),
+                    min_restore_points=int(skill_payload.get("min_restore_points") or 1),
+                    settings=settings,
+                )
+            else:
+                result = run_target_tracked(
+                    str(job["reference"]),
+                    str(job.get("objective") or ""),
+                    environment=environment,
+                    mode=str(job.get("mode") or "propose"),
+                    approve=bool(job.get("approve", False)),
+                    ssh_port=job.get("ssh_port"),
+                    provider_name=selection["provider"],
+                    model_name=selection["model"] or None,
+                    playbook_mode=selection["playbook_mode"],
+                    playbook_id=selection["playbook_id"],
+                    settings=settings,
+                )
             raise_if_cancelled("Job cancelado antes da persistência final.")
         current = get_job(job_id, settings=settings) or {}
         payload = {
             **current,
             "job_id": job_id,
+            **job_identity,
             "status": "completed",
             "worker": worker,
             "completed_at": _now(),
             "percent": 100,
             "investigation_id": result.get("investigation_id"),
             "result": result,
-            **selection,
+            **({} if job_type == "skill" else selection),
         }
         _store(client, settings, job_id, payload)
         return payload
@@ -277,6 +369,7 @@ def _execute_job(job: dict[str, Any], *, settings: Settings) -> dict[str, Any]:
         payload = {
             **current,
             "job_id": job_id,
+            **job_identity,
             "status": "cancelled",
             "worker": worker,
             "cancelled_at": cancelled_at,
@@ -288,7 +381,7 @@ def _execute_job(job: dict[str, Any], *, settings: Settings) -> dict[str, Any]:
                 "detail": str(exc) or "Coleta cancelada pelo operador.",
                 "updated_at": cancelled_at,
             },
-            **selection,
+            **({} if job_type == "skill" else selection),
         }
         _store(client, settings, job_id, payload)
         return payload
@@ -297,11 +390,12 @@ def _execute_job(job: dict[str, Any], *, settings: Settings) -> dict[str, Any]:
         payload = {
             **current,
             "job_id": job_id,
+            **job_identity,
             "status": "failed",
             "worker": worker,
             "completed_at": _now(),
             "error": f"{type(exc).__name__}: {exc}",
-            **selection,
+            **({} if job_type == "skill" else selection),
         }
         _store(client, settings, job_id, payload)
         return payload
