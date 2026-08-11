@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "catalog_version": "1.0.0",
+  "skills": [
+    {
+      "id": "backup_validation",
+      "display_name": "Backup Validation",
+      "description": "Validação controlada de filesystem, montagem, espaço, retenção, último backup e redundância.",
+      "category": "Backup",
+      "status": "active",
+      "version": "1.0.0",
+      "scope": "Servidores de backup",
+      "mode": "diagnostic_first",
+      "dependencies": {
+        "commands": ["df", "findmnt", "mountpoint"],
+        "scripts": ["/db/backup/scripts/mount.sh"]
+      },
+      "actions": [
+        {
+          "id": "validate_filesystem",
+          "label": "Validar filesystem",
+          "description": "Verifica o filesystem associado ao armazenamento de backup.",
+          "type": "query",
+          "risk": "read_only",
+          "enabled": true
+        },
+        {
+          "id": "validate_mount",
+          "label": "Validar montagem",
+          "description": "Confirma se a unidade esperada está montada.",
+          "type": "query",
+          "risk": "read_only",
+          "enabled": true
+        },
+        {
+          "id": "validate_space",
+          "label": "Validar espaço",
+          "description": "Verifica utilização e espaço livre do filesystem.",
+          "type": "query",
+          "risk": "read_only",
+          "enabled": true
+        },
+        {
+          "id": "validate_retention",
+          "label": "Validar retenção",
+          "description": "Compara os backups encontrados com a política de retenção definida.",
+          "type": "query",
+          "risk": "read_only",
+          "enabled": true
+        },
+        {
+          "id": "validate_last_backup",
+          "label": "Validar último backup",
+          "description": "Valida data e presença do último backup esperado.",
+          "type": "query",
+          "risk": "read_only",
+          "enabled": true
+        },
+        {
+          "id": "validate_redundancy",
+          "label": "Validar redundância",
+          "description": "Verifica a presença da cópia redundante definida para a rotina.",
+          "type": "query",
+          "risk": "read_only",
+          "enabled": true
+        },
+        {
+          "id": "execute_mount_script",
+          "label": "Executar script de montagem",
+          "description": "Ação preventiva/corretiva usando exclusivamente o script padrão de montagem.",
+          "type": "operational",
+          "risk": "approval_required",
+          "enabled": false,
+          "command": "/db/backup/scripts/mount.sh",
+          "note": "Reservada para a próxima etapa de integração com aprovação humana, segunda IA e pós-validação."
+        }
+      ]
+    },
+    {
+      "id": "linux_diagnostics",
+      "display_name": "Linux Diagnostics",
+      "description": "Diagnóstico estruturado de CPU, memória, disco, processos, serviços e rede.",
+      "category": "Linux",
+      "status": "planned",
+      "version": "0.1.0",
+      "scope": "Servidores Linux",
+      "mode": "diagnostic_first",
+      "dependencies": {"commands": [], "scripts": []},
+      "actions": []
+    },
+    {
+      "id": "backup_operations",
+      "display_name": "Backup Operations",
+      "description": "Ações operacionais controladas sobre rotinas de backup e sincronização.",
+      "category": "Backup",
+      "status": "planned",
+      "version": "0.1.0",
+      "scope": "Servidores de backup",
+      "mode": "approval_required",
+      "dependencies": {"commands": [], "scripts": []},
+      "actions": []
+    },
+    {
+      "id": "database_backup",
+      "display_name": "Database Backup",
+      "description": "Validação de rotinas RMAN, Data Pump e SQL Server sem acesso ao conteúdo dos bancos.",
+      "category": "Database Backup",
+      "status": "planned",
+      "version": "0.1.0",
+      "scope": "Rotinas de backup de bancos",
+      "mode": "diagnostic_first",
+      "dependencies": {"commands": [], "scripts": []},
+      "actions": []
+    }
+  ]
+}
