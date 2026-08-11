@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_backup_validation_ui_exposes_read_only_execution_form():
     script = (ROOT / "app" / "ui" / "skills.js").read_text(encoding="utf-8")
+    discovery = (ROOT / "app" / "ui" / "skills-auto-discovery.js").read_text(encoding="utf-8")
     stylesheet = (ROOT / "app" / "ui" / "skills.css").read_text(encoding="utf-8")
     html = _enhanced_index()
 
@@ -18,10 +19,13 @@ def test_backup_validation_ui_exposes_read_only_execution_form():
     assert "Executar validação" in script
     assert "Somente consultas são executadas" in script
     assert "Solicitar montagem" in script
-    assert "disabled" in script
+    assert "mount_point" in discovery
+    assert "redundancy_path" in discovery
+    assert "Descoberta automática de storage" in discovery
     assert ".skill-result-row" in stylesheet
     assert ".skill-run-form" in stylesheet
     assert f"/ui/assets/skills.js?v={ASSET_VERSION}" in html
+    assert f"/ui/assets/skills-auto-discovery.js?v={ASSET_VERSION}" in html
     assert f"/ui/assets/skills.css?v={ASSET_VERSION}" in html
 
 
@@ -30,8 +34,9 @@ def test_backup_validation_catalog_keeps_mount_action_disabled():
     skill = next(item for item in catalog["skills"] if item["id"] == "backup_validation")
     mount_action = next(item for item in skill["actions"] if item["id"] == "execute_mount_script")
 
-    assert catalog["catalog_version"] == "1.1.0"
-    assert skill["version"] == "1.1.0"
+    assert catalog["catalog_version"] == "1.2.0"
+    assert skill["version"] == "1.2.0"
+    assert "automaticamente" in next(item for item in skill["actions"] if item["id"] == "validate_redundancy")["description"]
     assert mount_action["risk"] == "approval_required"
     assert mount_action["enabled"] is False
     assert mount_action["command"] == "/db/backup/scripts/mount.sh"
