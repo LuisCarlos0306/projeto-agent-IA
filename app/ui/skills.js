@@ -8,6 +8,11 @@
     correction: "Correção",
   };
 
+  const ACTION_LABELS = {
+    command: "Comando",
+    script: "Script",
+  };
+
   function safe(value) {
     return String(value ?? "")
       .replaceAll("&", "&amp;")
@@ -18,8 +23,8 @@
   }
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const lines = (value) => String(value || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
   const modeLabel = (mode) => MODE_LABELS[mode] || "Leitura";
+  const actionLabel = (type) => ACTION_LABELS[type] || "Comando";
 
   async function requestJson(path, options = {}) {
     const init = { ...options, headers: { ...(options.headers || {}) } };
@@ -52,7 +57,7 @@
     const title = header.querySelector("h3");
     const description = header.querySelector("p:not(.eyebrow)");
     if (title) title.textContent = "Minhas Skills";
-    if (description) description.textContent = "Crie Skills de leitura, diagnóstico ou correção protegida e execute informando somente o IP ou servidor.";
+    if (description) description.textContent = "Crie Skills com ações controladas e execute informando somente o IP ou servidor.";
   }
 
   function renderGrid() {
@@ -62,40 +67,59 @@
       grid.innerHTML = `
         <div class="skills-empty custom-skills-empty">
           <strong>Nenhuma Skill personalizada criada.</strong>
-          <span>Clique em “Criar Skill” para cadastrar nome, permissão, comandos e scripts.</span>
+          <span>Clique em “Criar Skill” para cadastrar nome, permissão e ações.</span>
         </div>`;
       return;
     }
-    grid.innerHTML = skills.map((skill) => `
-      <article class="skill-card custom-skill-card" data-skill-id="${safe(skill.id)}">
-        <div class="skill-card-head">
-          <div class="skill-icon" aria-hidden="true">✦</div>
-          <div class="custom-skill-card-copy">
-            <h4>${safe(skill.name)}</h4>
-            <p>${safe(skill.description || "Skill personalizada")}</p>
+    grid.innerHTML = skills.map((skill) => {
+      const actionCount = (skill.commands?.length || 0) + (skill.scripts?.length || 0);
+      return `
+        <article class="skill-card custom-skill-card" data-skill-id="${safe(skill.id)}">
+          <div class="skill-card-head">
+            <div class="skill-icon" aria-hidden="true">✦</div>
+            <div class="custom-skill-card-copy">
+              <h4>${safe(skill.name)}</h4>
+              <p>${safe(skill.description || "Skill personalizada")}</p>
+            </div>
+            <div class="custom-skill-card-actions">
+              <button class="custom-skill-edit" type="button" data-edit-skill="${safe(skill.id)}" title="Editar Skill" aria-label="Editar Skill ${safe(skill.name)}">✎</button>
+              <button class="custom-skill-delete" type="button" data-delete-skill="${safe(skill.id)}" title="Apagar Skill" aria-label="Apagar Skill ${safe(skill.name)}">⌫</button>
+            </div>
           </div>
-          <div class="custom-skill-card-actions">
-            <button class="custom-skill-edit" type="button" data-edit-skill="${safe(skill.id)}" title="Editar Skill" aria-label="Editar Skill ${safe(skill.name)}">✎</button>
-            <button class="custom-skill-delete" type="button" data-delete-skill="${safe(skill.id)}" title="Apagar Skill" aria-label="Apagar Skill ${safe(skill.name)}">⌫</button>
+          <div class="skill-card-meta">
+            <span class="skill-status active">Ativa</span>
+            <span class="skill-chip custom-mode ${safe(skill.mode || "read_only")}">${safe(modeLabel(skill.mode))}</span>
+            <span class="skill-chip">${actionCount} ação(ões)</span>
           </div>
-        </div>
-        <div class="skill-card-meta">
-          <span class="skill-status active">Ativa</span>
-          <span class="skill-chip custom-mode ${safe(skill.mode || "read_only")}">${safe(modeLabel(skill.mode))}</span>
-          <span class="skill-chip">${skill.commands?.length || 0} comando(s)</span>
-          <span class="skill-chip">${skill.scripts?.length || 0} script(s)</span>
-        </div>
-        <div class="skill-card-footer">
-          <span class="skill-chip">Personalizada</span>
-          <button class="skill-open" type="button" data-open-custom-skill="${safe(skill.id)}">Abrir</button>
-        </div>
-      </article>
-    `).join("");
+          <div class="skill-card-footer">
+            <span class="skill-chip">Personalizada</span>
+            <button class="skill-open" type="button" data-open-custom-skill="${safe(skill.id)}">Abrir / Executar</button>
+          </div>
+        </article>`;
+    }).join("");
+  }
+
+  function actionRow(type, value) {
+    return `
+      <div class="custom-skill-action-item" data-skill-action-item data-action-type="${safe(type)}" data-action-value="${safe(value)}">
+        <span class="custom-action-type ${safe(type)}">${safe(actionLabel(type))}</span>
+        <code>${safe(value)}</code>
+        <button type="button" data-remove-skill-action title="Remover ação" aria-label="Remover ação">×</button>
+      </div>`;
+  }
+
+  function initialActions(skill) {
+    if (!skill) return [];
+    return [
+      ...(skill.commands || []).map((value) => ({ type: "command", value })),
+      ...(skill.scripts || []).map((value) => ({ type: "script", value })),
+    ];
   }
 
   function editorForm(skill = null) {
     const editing = Boolean(skill);
     const mode = skill?.mode || "read_only";
+    const actions = initialActions(skill);
     return `
       <div class="skill-detail-header">
         <div class="skill-detail-title">
@@ -103,7 +127,7 @@
           <div>
             <p class="eyebrow">${editing ? "EDITAR SKILL" : "NOVA SKILL"}</p>
             <h3>${editing ? `Editar ${safe(skill.name)}` : "Criar Skill"}</h3>
-            <p>Defina o tipo de permissão, os comandos de consulta e, quando necessário, scripts controlados.</p>
+            <p>Defina a permissão e adicione cada ação escolhendo se ela é um comando ou um script.</p>
           </div>
         </div>
       </div>
@@ -118,11 +142,28 @@
             </select>
           </label>
           <label class="wide"><span>Descrição <small>opcional</small></span><input name="description" maxlength="300" value="${safe(skill?.description || "")}" placeholder="Ex.: Valida filesystem, mounts e espaço"></label>
-          <label class="wide"><span>Comandos <small>um por linha</small></span><textarea name="commands" rows="8" placeholder="df -h\nfindmnt\nlsblk">${safe((skill?.commands || []).join("\n"))}</textarea><small>Comandos são sempre validados como consulta segura.</small></label>
-          <label class="wide"><span>Scripts <small>um caminho absoluto por linha</small></span><textarea name="scripts" rows="6" placeholder="/db/backup/scripts/mount.sh">${safe((skill?.scripts || []).join("\n"))}</textarea><small>Scripts não recebem argumentos pela tela e nunca são executados sem aprovação.</small></label>
+
+          <div class="wide custom-action-builder">
+            <div class="custom-action-builder-title">
+              <div><strong>Ações da Skill</strong><small>Selecione o tipo, informe o comando ou caminho do script e clique em Adicionar.</small></div>
+            </div>
+            <div class="custom-action-add-row">
+              <label><span>Tipo</span>
+                <select id="custom-skill-action-type">
+                  <option value="command">Comando</option>
+                  <option value="script">Script</option>
+                </select>
+              </label>
+              <label class="custom-action-value"><span>Comando ou caminho do script</span><input id="custom-skill-action-value" autocomplete="off" placeholder="Ex.: df -h"></label>
+              <button type="button" class="secondary-button" data-add-skill-action>Adicionar</button>
+            </div>
+            <div id="custom-skill-action-list" class="custom-skill-action-list">
+              ${actions.length ? actions.map((item) => actionRow(item.type, item.value)).join("") : '<div class="custom-action-empty">Nenhuma ação adicionada.</div>'}
+            </div>
+          </div>
         </div>
         <div class="skill-warning custom-mode-warning">
-          <strong>Política de execução:</strong> Leitura não aceita scripts. Diagnóstico pode registrar scripts, mas eles ficam protegidos. Correção registra scripts corretivos e exige aprovação humana antes de qualquer execução.
+          <strong>Política de execução:</strong> comandos são sempre validados como consulta segura. Scripts devem usar caminho absoluto e continuam protegidos por aprovação operacional.
         </div>
         <div class="custom-skill-editor-actions">
           <button type="button" class="ghost-button" data-close-skill-detail>Cancelar</button>
@@ -144,6 +185,7 @@
     const panel = document.querySelector("#skill-detail");
     if (!panel) return;
     const scripts = skill.scripts || [];
+    const commands = skill.commands || [];
     panel.hidden = false;
     panel.innerHTML = `
       <div class="skill-detail-header">
@@ -153,28 +195,29 @@
         </div>
         <span class="risk-badge ${skill.mode === "correction" ? "approval_required" : "read_only"}">${safe(modeLabel(skill.mode))}</span>
       </div>
-      <div class="custom-skill-definition-grid">
-        <div class="custom-skill-command-summary">
-          <strong>Comandos configurados</strong>
-          <div>${(skill.commands || []).length ? (skill.commands || []).map((command) => `<code>${safe(command)}</code>`).join("") : '<span class="custom-empty-definition">Nenhum comando.</span>'}</div>
-        </div>
-        <div class="custom-skill-command-summary">
-          <strong>Scripts configurados</strong>
-          <div>${scripts.length ? scripts.map((script) => `<code>${safe(script)}</code>`).join("") : '<span class="custom-empty-definition">Nenhum script.</span>'}</div>
-        </div>
-      </div>
-      ${scripts.length ? '<div class="skill-warning"><strong>Scripts protegidos:</strong> ficam cadastrados na Skill, mas exigem aprovação operacional antes de qualquer execução.</div>' : ""}
-      <section class="skill-run-panel custom-skill-run-panel">
+
+      <section class="skill-run-panel custom-skill-run-panel custom-skill-run-prominent">
         <div class="skill-run-head">
-          <div><p class="eyebrow">EXECUTAR</p><h4>Executar ${safe(skill.name)}</h4><p>Informe somente o IP ou servidor. A definição da Skill já contém comandos e scripts.</p></div>
+          <div><p class="eyebrow">EXECUTAR</p><h4>Informe o IP / Servidor</h4><p>A Skill já contém todas as ações cadastradas. Para executar, preencha somente o alvo.</p></div>
         </div>
         <form id="custom-skill-run-form" data-skill-id="${safe(skill.id)}" class="custom-skill-run-form">
-          <label><span>IP / Servidor</span><input name="target" required maxlength="255" autocomplete="off" placeholder="172.27.232.212"></label>
-          <button class="primary-button" type="submit">Executar</button>
+          <label><span>IP / Servidor</span><input name="target" required maxlength="255" autocomplete="off" autofocus placeholder="Ex.: 172.27.232.212"></label>
+          <button class="primary-button" type="submit">Executar Skill</button>
         </form>
         <div id="custom-skill-result" class="skill-result" hidden></div>
-      </section>`;
+      </section>
+
+      <div class="custom-skill-command-summary custom-skill-actions-summary">
+        <strong>Ações configuradas</strong>
+        <div>
+          ${commands.map((command) => `<span class="custom-definition-item"><b>Comando</b><code>${safe(command)}</code></span>`).join("")}
+          ${scripts.map((script) => `<span class="custom-definition-item"><b>Script</b><code>${safe(script)}</code></span>`).join("")}
+          ${!commands.length && !scripts.length ? '<span class="custom-empty-definition">Nenhuma ação.</span>' : ""}
+        </div>
+      </div>
+      ${scripts.length ? '<div class="skill-warning"><strong>Scripts protegidos:</strong> ficam cadastrados na Skill, mas exigem aprovação operacional antes de qualquer execução.</div>' : ""}`;
     panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTimeout(() => panel.querySelector('input[name="target"]')?.focus(), 80);
   }
 
   function renderRunning(detail = "Aguardando worker operacional.") {
@@ -219,7 +262,7 @@
       if (job.status === "completed") return job.result || {};
       if (job.status === "failed") throw new Error(job.error || "Worker não concluiu a Skill.");
       if (job.status === "cancelled") throw new Error("Execução cancelada.");
-      renderRunning(job.current_phase?.detail || "Executando comandos da Skill.");
+      renderRunning(job.current_phase?.detail || "Executando ações da Skill.");
     }
     throw new Error("Tempo máximo de acompanhamento excedido.");
   }
@@ -243,8 +286,38 @@
       }
     } finally {
       button.disabled = false;
-      button.textContent = "Executar";
+      button.textContent = "Executar Skill";
     }
+  }
+
+  function collectActions(form) {
+    const rows = [...form.querySelectorAll("[data-skill-action-item]")];
+    return {
+      commands: rows.filter((row) => row.dataset.actionType === "command").map((row) => row.dataset.actionValue),
+      scripts: rows.filter((row) => row.dataset.actionType === "script").map((row) => row.dataset.actionValue),
+    };
+  }
+
+  function addAction(form) {
+    const type = form.querySelector("#custom-skill-action-type")?.value || "command";
+    const input = form.querySelector("#custom-skill-action-value");
+    const value = String(input?.value || "").trim();
+    if (!value) {
+      input?.focus();
+      return;
+    }
+    const list = form.querySelector("#custom-skill-action-list");
+    list?.querySelector(".custom-action-empty")?.remove();
+    if ([...form.querySelectorAll("[data-skill-action-item]")].some((row) => row.dataset.actionType === type && row.dataset.actionValue === value)) {
+      input.setCustomValidity("Esta ação já foi adicionada.");
+      input.reportValidity();
+      input.setCustomValidity("");
+      return;
+    }
+    list?.insertAdjacentHTML("beforeend", actionRow(type, value));
+    input.value = "";
+    input.placeholder = type === "script" ? "Ex.: /db/backup/scripts/mount.sh" : "Ex.: df -h";
+    input.focus();
   }
 
   async function submitEditor(form) {
@@ -252,27 +325,29 @@
     const skillId = form.dataset.skillId;
     const message = form.querySelector("#custom-skill-editor-message");
     const button = form.querySelector('button[type="submit"]');
+    const actions = collectActions(form);
     button.disabled = true;
     try {
       const body = {
         name: String(data.get("name") || "").trim(),
         description: String(data.get("description") || "").trim(),
         mode: String(data.get("mode") || "read_only"),
-        commands: lines(data.get("commands")),
-        scripts: lines(data.get("scripts")),
+        commands: actions.commands,
+        scripts: actions.scripts,
       };
-      await requestJson(
+      const response = await requestJson(
         skillId ? `/ui/api/skills/custom/${encodeURIComponent(skillId)}` : "/ui/api/skills/custom",
         { method: skillId ? "PUT" : "POST", body },
       );
       await loadSkills(true);
-      message.hidden = false;
-      message.className = "custom-skill-message success";
-      message.textContent = skillId ? "Skill atualizada com sucesso." : "Skill criada com sucesso.";
-      setTimeout(() => {
-        const panel = document.querySelector("#skill-detail");
-        if (panel) panel.hidden = true;
-      }, 700);
+      const saved = skills.find((item) => item.id === response.skill?.id) || response.skill;
+      if (saved) {
+        renderSkill(saved);
+      } else {
+        message.hidden = false;
+        message.className = "custom-skill-message success";
+        message.textContent = skillId ? "Skill atualizada com sucesso." : "Skill criada com sucesso.";
+      }
     } catch (error) {
       message.hidden = false;
       message.className = "custom-skill-message error";
@@ -335,6 +410,39 @@
         if (panel) panel.hidden = true;
       }
     });
+
+    document.querySelector("#skill-detail")?.addEventListener("click", (event) => {
+      const add = event.target.closest("[data-add-skill-action]");
+      if (add) {
+        const form = add.closest("#custom-skill-editor-form");
+        if (form) addAction(form);
+        return;
+      }
+      const remove = event.target.closest("[data-remove-skill-action]");
+      if (remove) {
+        const row = remove.closest("[data-skill-action-item]");
+        const list = row?.parentElement;
+        row?.remove();
+        if (list && !list.querySelector("[data-skill-action-item]")) {
+          list.innerHTML = '<div class="custom-action-empty">Nenhuma ação adicionada.</div>';
+        }
+      }
+    });
+
+    document.querySelector("#skill-detail")?.addEventListener("change", (event) => {
+      if (event.target?.id !== "custom-skill-action-type") return;
+      const form = event.target.closest("#custom-skill-editor-form");
+      const input = form?.querySelector("#custom-skill-action-value");
+      if (input) input.placeholder = event.target.value === "script" ? "Ex.: /db/backup/scripts/mount.sh" : "Ex.: df -h";
+    });
+
+    document.querySelector("#skill-detail")?.addEventListener("keydown", (event) => {
+      if (event.target?.id !== "custom-skill-action-value" || event.key !== "Enter") return;
+      event.preventDefault();
+      const form = event.target.closest("#custom-skill-editor-form");
+      if (form) addAction(form);
+    });
+
     document.querySelector("#skill-detail")?.addEventListener("submit", (event) => {
       if (event.target.id === "custom-skill-editor-form") {
         event.preventDefault();
