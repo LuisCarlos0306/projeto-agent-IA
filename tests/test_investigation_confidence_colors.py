@@ -24,6 +24,6 @@ def test_confidence_component_updates_dashboard_and_history() -> None:
 
 
 def test_confidence_assets_use_current_ui_version() -> None:
-    assert 'ASSET_VERSION = "1.30.22"' in WEB
+    assert 'ASSET_VERSION = "1.30.23"' in WEB
     assert '"investigation-confidence.css"' in WEB
     assert '"investigation-confidence.js"' in WEB
