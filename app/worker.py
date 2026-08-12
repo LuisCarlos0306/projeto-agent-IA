@@ -53,7 +53,6 @@ def run(
         f"Segredos: {secret_backend_status(settings).get('backend')}\n"
         f"StrictHostKeyChecking: {settings.ssh_strict_host_key_checking}\n"
         f"Coleta focada: {focused}\n"
-        f"Mount recovery: validação mapeada + confirmação humana\n"
         f"Idioma das mensagens: pt-BR\n"
         f"Confiança por evidências: ativa\n"
         f"Cancelamento forçado: {cancel_grace}s\n"
