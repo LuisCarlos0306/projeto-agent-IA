@@ -6,6 +6,7 @@ from app.core.policies import EnvironmentType
 from app.core.settings import Settings, get_settings
 from app.services.custom_skill_registry import get_custom_skill, validate_custom_command
 from app.services.progress import report_progress
+from app.services.redaction import redact_text
 from app.services.runner import build_executor, resolve_target
 
 
@@ -13,7 +14,7 @@ _MAX_OUTPUT = 16000
 
 
 def _clip(value: str) -> str:
-    text = str(value or "")
+    text = redact_text(str(value or ""))
     if len(text) <= _MAX_OUTPUT:
         return text
     return text[:_MAX_OUTPUT] + "\n...[saída truncada]"
