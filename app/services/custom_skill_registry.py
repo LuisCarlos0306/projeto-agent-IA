@@ -19,9 +19,7 @@ _SAFE_BINARIES = {
     "free", "vmstat", "iostat", "mpstat", "sar", "lscpu", "lsmem", "ps",
     "df", "du", "lsblk", "blkid", "findmnt", "stat", "ls",
     "ip", "ss", "netstat", "route", "arp", "ping", "traceroute", "tracepath", "ethtool", "resolvectl",
-    "getent", "host", "dig", "nslookup",
-    "cat", "head", "tail", "grep", "cut", "sort", "uniq", "wc", "journalctl", "dmesg",
-    "systemctl", "service", "cmk-agent-ctl", "snmpget", "snmpwalk", "snmpbulkwalk",
+    "host", "dig", "nslookup", "journalctl", "dmesg", "systemctl", "service", "cmk-agent-ctl",
 }
 _FORBIDDEN_SYNTAX = (";", "&&", "||", "|", ">", "<", "`", "$(", "${", "\n", "\r")
 _SAFE_SYSTEMCTL = {"status", "is-active", "is-enabled", "list-units", "list-unit-files", "show", "cat"}
