@@ -17,12 +17,16 @@ DEFAULT_REGISTRY_PATH = Path("/opt/agent-ia/data/custom-skills.json")
 _SAFE_BINARIES = {
     "uptime", "hostname", "hostnamectl", "uname", "nproc", "date", "timedatectl", "who", "w", "last",
     "free", "vmstat", "iostat", "mpstat", "sar", "lscpu", "lsmem", "ps",
-    "df", "du", "lsblk", "blkid", "findmnt", "stat", "ls",
-    "ip", "ss", "netstat", "route", "arp", "ping", "traceroute", "tracepath", "ethtool", "resolvectl",
-    "host", "dig", "nslookup", "journalctl", "dmesg", "systemctl", "service", "cmk-agent-ctl",
+    "df", "du", "lsblk", "findmnt", "stat", "ls",
+    "ip", "ss", "netstat", "ping", "traceroute", "tracepath", "host", "dig", "nslookup",
+    "journalctl", "dmesg", "systemctl", "service", "cmk-agent-ctl",
 }
 _FORBIDDEN_SYNTAX = (";", "&&", "||", "|", ">", "<", "`", "$(", "${", "\n", "\r")
 _SAFE_SYSTEMCTL = {"status", "is-active", "is-enabled", "list-units", "list-unit-files", "show", "cat"}
+_SAFE_HOSTNAME_FLAGS = {"-f", "--fqdn", "-s", "--short", "-d", "--domain", "-i", "--ip-address", "-I", "--all-ip-addresses"}
+_SAFE_TIMEDATECTL = {"status", "show", "timesync-status", "show-timesync", "list-timezones"}
+_IP_MUTATIONS = {"add", "del", "delete", "replace", "change", "set", "flush", "append", "prepend"}
+_JOURNAL_MUTATIONS = ("--vacuum", "--rotate", "--flush", "--sync", "--relinquish-var", "--smart-relinquish-var")
 
 
 def _now() -> str:
@@ -70,6 +74,29 @@ def _clean_name(value: str) -> str:
     return name
 
 
+def _validate_read_only_args(parts: list[str]) -> None:
+    binary = parts[0]
+    lowered = [item.casefold() for item in parts[1:]]
+    if binary == "hostname" and any(item not in _SAFE_HOSTNAME_FLAGS for item in parts[1:]):
+        raise ValueError("hostname aceita apenas consultas de nome/FQDN/IP")
+    if binary == "hostnamectl" and len(parts) > 1 and parts[1].casefold() != "status":
+        raise ValueError("hostnamectl aceita somente status")
+    if binary == "date" and any(item in {"-s", "--set"} or item.startswith("--set=") for item in lowered):
+        raise ValueError("date não pode alterar data/hora")
+    if binary == "timedatectl" and len(parts) > 1 and parts[1].casefold() not in _SAFE_TIMEDATECTL:
+        raise ValueError("timedatectl aceita somente consultas de status")
+    if binary == "ip" and _IP_MUTATIONS.intersection(lowered):
+        raise ValueError("ip aceita somente consultas; alterações de rede são bloqueadas")
+    if binary == "journalctl" and any(any(item.startswith(prefix) for prefix in _JOURNAL_MUTATIONS) for item in lowered):
+        raise ValueError("journalctl aceita somente leitura; manutenção de journal é bloqueada")
+    if binary == "dmesg" and any(item in {"-c", "--clear", "--read-clear"} for item in lowered):
+        raise ValueError("dmesg não pode limpar o buffer do kernel")
+    if binary == "systemctl" and (len(parts) < 2 or parts[1].casefold() not in _SAFE_SYSTEMCTL):
+        raise ValueError("systemctl em skill personalizada aceita somente consultas de status")
+    if binary == "service" and (len(parts) != 3 or parts[2].casefold() != "status"):
+        raise ValueError("service em skill personalizada aceita somente: service <nome> status")
+
+
 def validate_custom_command(command: str) -> str:
     raw = str(command or "").strip()
     if not raw:
@@ -87,12 +114,7 @@ def validate_custom_command(command: str) -> str:
     binary = parts[0]
     if binary not in _SAFE_BINARIES:
         raise ValueError(f"comando não permitido em skill personalizada: {binary}")
-    if binary == "systemctl":
-        if len(parts) < 2 or parts[1] not in _SAFE_SYSTEMCTL:
-            raise ValueError("systemctl em skill personalizada aceita somente consultas de status")
-    if binary == "service":
-        if len(parts) != 3 or parts[2] != "status":
-            raise ValueError("service em skill personalizada aceita somente: service <nome> status")
+    _validate_read_only_args(parts)
     allowed, reason, spec = validate_command(raw)
     if not allowed or spec is None or not spec.read_only:
         raise ValueError(reason or "comando fora do catálogo seguro")
