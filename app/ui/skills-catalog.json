@@ -1,25 +1,33 @@
 {
   "schema_version": 1,
-  "catalog_version": "1.2.0",
+  "catalog_version": "1.3.0",
   "skills": [
     {
       "id": "backup_validation",
       "display_name": "Backup Validation",
-      "description": "Validação executável com descoberta automática do filesystem principal e da unidade de redundância.",
+      "description": "Validação controlada das unidades de backup previamente mapeadas por servidor.",
       "category": "Backup",
       "status": "active",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "scope": "Servidores de backup",
       "mode": "diagnostic_first",
       "dependencies": {
-        "commands": ["df", "findmnt", "stat", "find", "sort", "head", "wc"],
+        "commands": ["df", "findmnt"],
         "scripts": ["/db/backup/scripts/mount.sh"]
       },
       "actions": [
         {
+          "id": "configure_storage_mapping",
+          "label": "Mapear storage",
+          "description": "Cadastra manualmente, uma única vez, as unidades esperadas do servidor e o script padrão de montagem.",
+          "type": "configuration",
+          "risk": "read_only",
+          "enabled": true
+        },
+        {
           "id": "validate_filesystem",
           "label": "Validar filesystem",
-          "description": "Descobre e verifica automaticamente o filesystem que sustenta o diretório de backup.",
+          "description": "Verifica os filesystems das unidades cadastradas para o servidor.",
           "type": "query",
           "risk": "read_only",
           "enabled": true
@@ -27,7 +35,7 @@
         {
           "id": "validate_mount",
           "label": "Validar montagem",
-          "description": "Compara a topologia montada com os mounts configurados e detecta underlay quando uma unidade esperada está desmontada.",
+          "description": "Confirma se cada unidade mapeada está montada no ponto esperado.",
           "type": "query",
           "risk": "read_only",
           "enabled": true
@@ -35,7 +43,7 @@
         {
           "id": "validate_space",
           "label": "Validar espaço",
-          "description": "Verifica utilização e espaço livre do filesystem principal descoberto.",
+          "description": "Verifica o espaço livre de cada unidade mapeada conforme o limite salvo.",
           "type": "query",
           "risk": "read_only",
           "enabled": true
@@ -43,36 +51,36 @@
         {
           "id": "validate_retention",
           "label": "Validar retenção",
-          "description": "Compara a quantidade de arquivos recentes com a janela e o mínimo definidos pelo operador.",
+          "description": "Reservada para a próxima etapa de políticas específicas de backup.",
           "type": "query",
           "risk": "read_only",
-          "enabled": true
+          "enabled": false
         },
         {
           "id": "validate_last_backup",
           "label": "Validar último backup",
-          "description": "Valida a idade do arquivo de backup mais recente encontrado.",
+          "description": "Reservada para a próxima etapa de rotinas e posições de backup.",
           "type": "query",
           "risk": "read_only",
-          "enabled": true
+          "enabled": false
         },
         {
           "id": "validate_redundancy",
-          "label": "Descobrir e validar redundância",
-          "description": "Identifica automaticamente candidatos NFS, CIFS, NAS, storage ou HD externo e valida a cópia mais recente.",
+          "label": "Validar redundância",
+          "description": "A redundância é validada como unidade mapeada com função Redundância ou Externa.",
           "type": "query",
           "risk": "read_only",
           "enabled": true
         },
         {
           "id": "execute_mount_script",
-          "label": "Executar script de montagem",
-          "description": "Ação preventiva/corretiva usando exclusivamente o script padrão de montagem.",
+          "label": "Solicitar validação da montagem",
+          "description": "Quando uma unidade estiver desmontada, informa a necessidade de validação antes de qualquer atuação.",
           "type": "operational",
           "risk": "approval_required",
           "enabled": false,
           "command": "/db/backup/scripts/mount.sh",
-          "note": "A execução permanece bloqueada nesta etapa. Quando habilitada, exigirá aprovação humana, segunda IA e pós-validação."
+          "note": "Neste primeiro momento o script nunca é executado automaticamente."
         }
       ]
     },
