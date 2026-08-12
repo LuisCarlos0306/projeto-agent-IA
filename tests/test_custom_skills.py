@@ -75,6 +75,11 @@ def test_custom_skill_rejects_mutating_or_shell_commands():
         "systemctl restart sshd",
         "df -h | grep backup",
         "cat /opt/agent-ia/app/.env",
+        "hostnamectl set-hostname teste",
+        "timedatectl set-timezone UTC",
+        "ip link set eth0 down",
+        "journalctl --vacuum-time=1d",
+        "dmesg -C",
     ):
         with pytest.raises(ValueError):
             validate_custom_command(command)
@@ -85,6 +90,8 @@ def test_custom_skill_accepts_read_only_diagnostics():
     assert validate_custom_command("findmnt") == "findmnt"
     assert validate_custom_command("systemctl status sshd") == "systemctl status sshd"
     assert validate_custom_command("ss -lntp") == "ss -lntp"
+    assert validate_custom_command("ip addr") == "ip addr"
+    assert validate_custom_command("hostname -I") == "hostname -I"
 
 
 def test_custom_skill_runner_executes_fixed_commands_with_only_target_input():
