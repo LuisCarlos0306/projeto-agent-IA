@@ -9,7 +9,13 @@ from app.core.policies import EnvironmentType
 from app.core.settings import get_settings
 from app.services.backup_storage_registry import DEFAULT_MOUNT_SCRIPT, get_mapping, save_mapping
 from app.services.custom_skill_jobs import enqueue_custom_skill
-from app.services.custom_skill_registry import create_custom_skill, delete_custom_skill, get_custom_skill, list_custom_skills
+from app.services.custom_skill_registry import (
+    create_custom_skill,
+    delete_custom_skill,
+    get_custom_skill,
+    list_custom_skills,
+    update_custom_skill,
+)
 from app.services.custom_skill_runner import run_custom_skill
 from app.services.jobs import enqueue_backup_validation, get_job
 from app.services.mapped_backup_validation import run_backup_validation
@@ -45,10 +51,12 @@ class BackupValidationPayload(BaseModel):
     min_restore_points: int = Field(default=1, ge=1, le=500)
 
 
-class CustomSkillCreatePayload(BaseModel):
+class CustomSkillPayload(BaseModel):
     name: str = Field(min_length=2, max_length=80)
     description: str = Field(default="", max_length=300)
-    commands: list[str] = Field(min_length=1, max_length=20)
+    mode: str = Field(default="read_only", max_length=32)
+    commands: list[str] = Field(default_factory=list, max_length=20)
+    scripts: list[str] = Field(default_factory=list, max_length=10)
 
 
 class CustomSkillRunPayload(BaseModel):
@@ -81,15 +89,42 @@ def custom_skills(request: Request) -> dict[str, Any]:
 
 
 @router.post("/custom")
-def create_skill(payload: CustomSkillCreatePayload, request: Request) -> dict[str, Any]:
+def create_skill(payload: CustomSkillPayload, request: Request) -> dict[str, Any]:
     _require_mutation(request)
     try:
-        skill = create_custom_skill(payload.name, payload.commands, description=payload.description)
+        skill = create_custom_skill(
+            payload.name,
+            payload.commands,
+            scripts=payload.scripts,
+            description=payload.description,
+            mode=payload.mode,
+        )
     except (OSError, RuntimeError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "created", "skill": skill, "operator": _operator_name()}
+
+
+@router.put("/custom/{skill_id}")
+def edit_skill(skill_id: str, payload: CustomSkillPayload, request: Request) -> dict[str, Any]:
+    _require_mutation(request)
+    try:
+        skill = update_custom_skill(
+            skill_id,
+            name=payload.name,
+            commands=payload.commands,
+            scripts=payload.scripts,
+            description=payload.description,
+            mode=payload.mode,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "updated", "skill": skill, "operator": _operator_name()}
 
 
 @router.delete("/custom/{skill_id}")

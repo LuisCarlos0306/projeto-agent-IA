@@ -13,7 +13,9 @@ from app.services.custom_skill_registry import (
     delete_custom_skill,
     get_custom_skill,
     list_custom_skills,
+    update_custom_skill,
     validate_custom_command,
+    validate_script_path,
 )
 from app.services.custom_skill_runner import run_custom_skill
 from app.services.ssh import CommandResult
@@ -50,19 +52,35 @@ def _target():
     )
 
 
-def test_custom_skill_registry_create_list_get_delete(tmp_path: Path):
+def test_custom_skill_registry_create_edit_list_get_delete(tmp_path: Path):
     path = tmp_path / "custom-skills.json"
     skill = create_custom_skill(
         "Validar Filesystem",
         ["df -h", "findmnt"],
         description="Validação simples",
+        mode="diagnostic",
+        scripts=["/db/backup/scripts/mount.sh"],
         path=path,
     )
 
     assert skill["name"] == "Validar Filesystem"
+    assert skill["mode"] == "diagnostic"
     assert skill["commands"] == ["df -h", "findmnt"]
+    assert skill["scripts"] == ["/db/backup/scripts/mount.sh"]
+
+    edited = update_custom_skill(
+        skill["id"],
+        name="Filesystem e Backup",
+        commands=["df -h"],
+        scripts=["/db/backup/scripts/mount.sh"],
+        description="Nome alterado pelo lápis",
+        mode="correction",
+        path=path,
+    )
+    assert edited["name"] == "Filesystem e Backup"
+    assert edited["mode"] == "correction"
+    assert get_custom_skill(skill["id"], path)["description"] == "Nome alterado pelo lápis"
     assert list_custom_skills(path)[0]["id"] == skill["id"]
-    assert get_custom_skill(skill["id"], path)["description"] == "Validação simples"
     assert oct(path.stat().st_mode & 0o777) == "0o600"
     assert delete_custom_skill(skill["id"], path=path) is True
     assert list_custom_skills(path) == []
@@ -94,14 +112,39 @@ def test_custom_skill_accepts_read_only_diagnostics():
     assert validate_custom_command("hostname -I") == "hostname -I"
 
 
-def test_custom_skill_runner_executes_fixed_commands_with_only_target_input():
+def test_custom_script_path_is_restricted_to_allowed_roots(monkeypatch):
+    assert validate_script_path("/db/backup/scripts/mount.sh") == "/db/backup/scripts/mount.sh"
+    with pytest.raises(ValueError):
+        validate_script_path("/tmp/teste.sh")
+    with pytest.raises(ValueError):
+        validate_script_path("/db/backup/scripts/mount.sh --force")
+
+    monkeypatch.setenv("AGENT_CUSTOM_SKILL_SCRIPT_ROOTS", "/opt/custom/scripts")
+    assert validate_script_path("/opt/custom/scripts/check.sh") == "/opt/custom/scripts/check.sh"
+    with pytest.raises(ValueError):
+        validate_script_path("/db/backup/scripts/mount.sh")
+
+
+def test_read_only_skill_rejects_scripts(tmp_path: Path):
+    with pytest.raises(ValueError):
+        create_custom_skill(
+            "Leitura simples",
+            ["df -h"],
+            mode="read_only",
+            scripts=["/db/backup/scripts/mount.sh"],
+            path=tmp_path / "custom-skills.json",
+        )
+
+
+def test_custom_skill_runner_executes_commands_but_never_scripts_without_approval():
     fake = FakeExecutor()
     skill = {
         "id": "abc123",
         "name": "Validar Filesystem",
         "description": "",
         "commands": ["df -h", "findmnt"],
-        "mode": "read_only",
+        "scripts": ["/db/backup/scripts/mount.sh"],
+        "mode": "correction",
     }
     settings = SimpleNamespace(ssh_command_timeout=60)
 
@@ -110,19 +153,30 @@ def test_custom_skill_runner_executes_fixed_commands_with_only_target_input():
     ), patch("app.services.custom_skill_runner.build_executor", return_value=fake):
         result = run_custom_skill("abc123", "172.27.232.212", settings=settings)
 
-    assert result["status"] == "healthy"
+    assert result["status"] == "attention"
+    assert result["mode"] == "correction"
     assert result["target"] == "172.27.232.212"
     assert [item[0] for item in fake.commands] == ["df -h", "findmnt"]
     assert all(item[2] is False for item in fake.commands)
     assert fake.connected and fake.closed
+    assert result["approval_required"] is True
+    assert result["scripts"] == [
+        {
+            "path": "/db/backup/scripts/mount.sh",
+            "risk": "approval_required",
+            "enabled": False,
+            "status": "pending_approval",
+        }
+    ]
     assert result["executed_actions"] == []
 
 
 def test_custom_skill_registry_file_contains_no_execution_target(tmp_path: Path):
     path = tmp_path / "custom-skills.json"
-    create_custom_skill("Rede", ["ip addr", "ss -lntp"], path=path)
+    create_custom_skill("Rede", ["ip addr", "ss -lntp"], mode="diagnostic", path=path)
     payload = json.loads(path.read_text(encoding="utf-8"))
 
     rendered = json.dumps(payload)
+    assert payload["schema_version"] == 2
     assert "target" not in rendered
     assert "password" not in rendered

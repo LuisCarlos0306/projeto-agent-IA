@@ -7,25 +7,35 @@ from app.web_fast_validation import ASSET_VERSION, _enhanced_index
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_skills_ui_uses_custom_builder_and_target_only_execution():
+def test_skills_ui_supports_edit_modes_scripts_and_target_only_execution():
     script = (ROOT / "app" / "ui" / "skills.js").read_text(encoding="utf-8")
     stylesheet = (ROOT / "app" / "ui" / "custom-skills.css").read_text(encoding="utf-8")
     html = _enhanced_index()
 
     assert "+ Criar Skill" in script
-    assert 'id="custom-skill-create-form"' in script
+    assert 'id="custom-skill-editor-form"' in script
     assert "Nome da Skill" in script
+    assert "Permissão da Skill" in script
+    assert '>Leitura<' in script
+    assert '>Diagnóstico<' in script
+    assert '>Correção<' in script
     assert "Comandos" in script
+    assert "Scripts" in script
+    assert "/db/backup/scripts/mount.sh" in script
+    assert "data-edit-skill" in script
+    assert "✎" in script
+    assert "data-delete-skill" in script
     assert 'id="custom-skill-run-form"' in script
     assert "IP / Servidor" in script
     assert "Informe somente o IP ou servidor" in script
-    assert "data-delete-skill" in script
-    assert "/ui/api/skills/custom" in script
+    assert 'method: skillId ? "PUT" : "POST"' in script
+    assert "Scripts aguardando aprovação" in script
+    assert "Nenhum script foi executado nesta etapa" in script
     assert "mount_point" not in script
     assert "redundancy_path" not in script
     assert "backup_path" not in script
-    assert ".custom-skill-run-form" in stylesheet
-    assert ".custom-skill-delete" in stylesheet
+    assert ".custom-skill-edit" in stylesheet
+    assert ".custom-pending-scripts" in stylesheet
     assert f"/ui/assets/skills.js?v={ASSET_VERSION}" in html
     assert f"/ui/assets/custom-skills.css?v={ASSET_VERSION}" in html
     assert "skills-auto-discovery.js" not in html
