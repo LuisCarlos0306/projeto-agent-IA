@@ -59,12 +59,21 @@ def _overall(units: list[dict[str, Any]]) -> str:
         return "critical"
     if "attention" in states:
         return "attention"
+    if "inconclusive" in states:
+        return "inconclusive"
     if states and all(state == "healthy" for state in states):
         return "healthy"
     return "inconclusive"
 
 
-def _validate_mapping(reference: str, mapping: dict[str, Any], *, environment: EnvironmentType, ssh_port: int | None, settings: Settings) -> dict[str, Any]:
+def _validate_mapping(
+    reference: str,
+    mapping: dict[str, Any] | None,
+    *,
+    environment: EnvironmentType,
+    ssh_port: int | None,
+    settings: Settings,
+) -> dict[str, Any]:
     target = resolve_target(reference, environment, ssh_port, settings=settings)
     if mapping is None:
         mapping = get_mapping(target.host)
@@ -74,6 +83,8 @@ def _validate_mapping(reference: str, mapping: dict[str, Any], *, environment: E
     executor = build_executor(target, settings=settings)
     results: list[dict[str, Any]] = []
     missing: list[str] = []
+    capacity_alerts: list[str] = []
+    inconclusive: list[str] = []
 
     report_progress(
         "skill_started",
@@ -127,6 +138,7 @@ def _validate_mapping(reference: str, mapping: dict[str, Any], *, environment: E
                     fstype=mount.get("fstype"),
                     detail=f"{mount_point} está montado, mas não foi possível interpretar o espaço livre.",
                 )
+                inconclusive.append(mount_point)
             else:
                 free_percent = int(df_info["free_percent"])
                 status = "healthy" if free_percent >= int(unit["min_free_percent"]) else "attention"
@@ -143,6 +155,8 @@ def _validate_mapping(reference: str, mapping: dict[str, Any], *, environment: E
                         else f"{mount_point} montado, porém com apenas {free_percent}% livre; mínimo mapeado: {unit['min_free_percent']}%."
                     ),
                 )
+                if status == "attention":
+                    capacity_alerts.append(mount_point)
             results.append(row)
             report_progress(
                 "skill_unit_checked",
@@ -153,8 +167,8 @@ def _validate_mapping(reference: str, mapping: dict[str, Any], *, environment: E
             )
 
         status = _overall(results)
-        action_required = bool(missing)
-        if action_required:
+        action_required = bool(missing or capacity_alerts or inconclusive)
+        if missing:
             operator_message = "Atuação necessária. Solicite a validação da montagem antes de qualquer ação operacional."
             action = {
                 "id": "request_mount_validation",
@@ -167,6 +181,28 @@ def _validate_mapping(reference: str, mapping: dict[str, Any], *, environment: E
                     f"Unidade(s) não montada(s): {', '.join(missing)}. "
                     "Neste primeiro momento o Agent apenas solicita validação; o script não é executado automaticamente."
                 ),
+            }
+        elif capacity_alerts:
+            operator_message = "Atuação necessária. Solicite validação de capacidade antes de qualquer ajuste."
+            action = {
+                "id": "request_capacity_validation",
+                "label": "Solicitar validação de capacidade",
+                "command": None,
+                "risk": "read_only",
+                "enabled": False,
+                "targets": capacity_alerts,
+                "detail": f"Unidade(s) abaixo do espaço livre mínimo: {', '.join(capacity_alerts)}.",
+            }
+        elif inconclusive:
+            operator_message = "Validação inconclusiva. Solicite nova validação técnica antes de qualquer atuação."
+            action = {
+                "id": "request_technical_validation",
+                "label": "Solicitar nova validação",
+                "command": None,
+                "risk": "read_only",
+                "enabled": False,
+                "targets": inconclusive,
+                "detail": f"Não foi possível concluir a leitura de capacidade em: {', '.join(inconclusive)}.",
             }
         else:
             operator_message = "Nenhuma necessidade de atuação. Todas as unidades mapeadas estão montadas e acessíveis."
