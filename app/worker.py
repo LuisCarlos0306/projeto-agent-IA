@@ -11,6 +11,7 @@ from app.core.settings import get_settings
 from app.db.base import ensure_database_schema
 from app.services.ai_instrumentation import install_ai_instrumentation
 from app.services.confidence_instrumentation import install_confidence_instrumentation
+from app.services.custom_skill_jobs import install_custom_skill_jobs
 from app.services.focused_validation import install_focused_validation
 from app.services.hard_job_alarm import install_hard_job_alarm
 from app.services.job_process_guard import install_job_process_guard
@@ -31,6 +32,7 @@ install_worker_cancel_watchdog()
 install_hard_job_alarm()
 install_job_process_guard()
 install_mapped_backup_validation()
+install_custom_skill_jobs()
 app = typer.Typer(no_args_is_help=True)
 console = Console()
 
@@ -53,6 +55,7 @@ def run(
         f"Segredos: {secret_backend_status(settings).get('backend')}\n"
         f"StrictHostKeyChecking: {settings.ssh_strict_host_key_checking}\n"
         f"Coleta focada: {focused}\n"
+        f"Skills personalizadas: leitura controlada\n"
         f"Idioma das mensagens: pt-BR\n"
         f"Confiança por evidências: ativa\n"
         f"Cancelamento forçado: {cancel_grace}s\n"
