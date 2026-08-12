@@ -7,26 +7,29 @@ from app.web_fast_validation import ASSET_VERSION, _enhanced_index
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_backup_validation_ui_uses_manual_mapping_and_simple_daily_form():
+def test_skills_ui_uses_custom_builder_and_target_only_execution():
     script = (ROOT / "app" / "ui" / "skills.js").read_text(encoding="utf-8")
-    mapping = (ROOT / "app" / "ui" / "skills-auto-discovery.js").read_text(encoding="utf-8")
-    stylesheet = (ROOT / "app" / "ui" / "skills-storage-mapping.css").read_text(encoding="utf-8")
+    stylesheet = (ROOT / "app" / "ui" / "custom-skills.css").read_text(encoding="utf-8")
     html = _enhanced_index()
 
-    assert 'id="backup-validation-form"' in script
-    assert "CONFIGURAÇÃO MANUAL · UMA VEZ" in mapping
-    assert "Mapear unidades do servidor" in mapping
-    assert "Salvar mapeamento" in mapping
-    assert "Validar servidor" in mapping
-    assert "/ui/api/skills/backup-validation/mappings" in mapping
-    assert "/ui/api/skills/backup-validation/run" in mapping
-    assert "Filesystem, unidades e script não são solicitados nesta tela" in mapping
-    assert "Nenhuma necessidade de atuação" in mapping
-    assert "Solicitar validação" in mapping
-    assert DEFAULT_MOUNT_SCRIPT in mapping
-    assert ".storage-map-unit" in stylesheet
-    assert f"/ui/assets/skills-auto-discovery.js?v={ASSET_VERSION}" in html
-    assert f"/ui/assets/skills-storage-mapping.css?v={ASSET_VERSION}" in html
+    assert "+ Criar Skill" in script
+    assert 'id="custom-skill-create-form"' in script
+    assert "Nome da Skill" in script
+    assert "Comandos" in script
+    assert 'id="custom-skill-run-form"' in script
+    assert "IP / Servidor" in script
+    assert "Informe somente o IP ou servidor" in script
+    assert "data-delete-skill" in script
+    assert "/ui/api/skills/custom" in script
+    assert "mount_point" not in script
+    assert "redundancy_path" not in script
+    assert "backup_path" not in script
+    assert ".custom-skill-run-form" in stylesheet
+    assert ".custom-skill-delete" in stylesheet
+    assert f"/ui/assets/skills.js?v={ASSET_VERSION}" in html
+    assert f"/ui/assets/custom-skills.css?v={ASSET_VERSION}" in html
+    assert "skills-auto-discovery.js" not in html
+    assert "skills-storage-mapping.css" not in html
 
 
 def test_backup_validation_catalog_keeps_mount_execution_disabled():
@@ -39,6 +42,3 @@ def test_backup_validation_catalog_keeps_mount_execution_disabled():
     assert mount_action["risk"] == "approval_required"
     assert mount_action["enabled"] is False
     assert mount_action["command"] == "/db/backup/scripts/mount.sh"
-
-
-DEFAULT_MOUNT_SCRIPT = "/db/backup/scripts/mount.sh"
