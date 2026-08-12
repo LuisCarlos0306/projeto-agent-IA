@@ -7,21 +7,34 @@ from pydantic import BaseModel, Field
 
 from app.core.policies import EnvironmentType
 from app.core.settings import get_settings
-from app.services.backup_validation import run_backup_validation
+from app.services.backup_storage_registry import DEFAULT_MOUNT_SCRIPT, get_mapping, save_mapping
 from app.services.jobs import enqueue_backup_validation, get_job
+from app.services.mapped_backup_validation import run_backup_validation
 from app.web import _operator_name, _require_access, _require_mutation
 
 
 router = APIRouter(prefix="/ui/api/skills", tags=["interface-skills"])
 
 
+class StorageUnitPayload(BaseModel):
+    mount_point: str = Field(min_length=1, max_length=1024)
+    role: str = Field(default="outro", max_length=32)
+    label: str = Field(default="", max_length=120)
+    min_free_percent: int = Field(default=20, ge=1, le=99)
+
+
+class StorageMappingPayload(BaseModel):
+    target: str = Field(min_length=1, max_length=255)
+    mount_script: str = Field(default=DEFAULT_MOUNT_SCRIPT, min_length=1, max_length=1024)
+    units: list[StorageUnitPayload] = Field(min_length=1, max_length=30)
+
+
 class BackupValidationPayload(BaseModel):
     target: str = Field(min_length=1, max_length=255)
     environment: EnvironmentType = EnvironmentType.UNKNOWN
     ssh_port: int | None = Field(default=None, ge=1, le=65535)
-    backup_path: str = Field(min_length=1, max_length=1024)
-    # Compatibilidade com clientes 1.1.x: estes campos são aceitos, mas a
-    # descoberta do servidor é soberana e não usa valores manuais de mount.
+    # Compatibilidade com telas 1.1/1.2. No modo mapeado estes valores são ignorados.
+    backup_path: str | None = Field(default=None, max_length=1024)
     mount_point: str | None = Field(default=None, max_length=1024)
     redundancy_path: str | None = Field(default=None, max_length=1024)
     min_free_percent: int = Field(default=20, ge=1, le=99)
@@ -38,13 +51,36 @@ def skill_runtime_status(request: Request) -> dict[str, Any]:
         "skills": {
             "backup_validation": {
                 "status": "active",
-                "version": "1.2.0",
+                "version": "1.3.0",
                 "execution": "read_only",
                 "execution_mode": settings.agent_execution_mode,
-                "storage_discovery": "automatic",
-                "mount_action": "approval_required_disabled",
+                "storage_source": "manual_mapping",
+                "mount_action": "validation_request_only",
             }
         }
+    }
+
+
+@router.get("/backup-validation/mappings/{target:path}")
+def read_backup_mapping(target: str, request: Request) -> dict[str, Any]:
+    _require_access(request)
+    mapping = get_mapping(target)
+    if not mapping:
+        raise HTTPException(status_code=404, detail="servidor ainda não possui mapeamento de storage")
+    return mapping
+
+
+@router.post("/backup-validation/mappings")
+def write_backup_mapping(payload: StorageMappingPayload, request: Request) -> dict[str, Any]:
+    _require_mutation(request)
+    try:
+        mapping = save_mapping(payload.model_dump(mode="json"))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "status": "saved",
+        "mapping": mapping,
+        "operator": _operator_name(),
     }
 
 
@@ -52,11 +88,15 @@ def skill_runtime_status(request: Request) -> dict[str, Any]:
 def execute_backup_validation(payload: BackupValidationPayload, request: Request) -> dict[str, Any]:
     _require_mutation(request)
     settings = get_settings()
-    # mount_point/redundancy_path vazios preservam o contrato do worker 1.1.x;
-    # run_backup_validation 1.2 ignora ambos e descobre a topologia no alvo.
+    if not get_mapping(payload.target.strip()):
+        raise HTTPException(
+            status_code=422,
+            detail="servidor sem mapeamento. Cadastre primeiro o script e as unidades esperadas na configuração da skill.",
+        )
+
     common = {
-        "mount_point": "",
-        "backup_path": payload.backup_path,
+        "backup_path": "",
+        "mount_point": None,
         "redundancy_path": None,
         "environment": payload.environment,
         "ssh_port": payload.ssh_port,
@@ -71,7 +111,7 @@ def execute_backup_validation(payload: BackupValidationPayload, request: Request
         try:
             return enqueue_backup_validation(
                 payload.target.strip(),
-                metadata={"source": "web_ui_skill", "operator": _operator_name()},
+                metadata={"source": "web_ui_skill_mapped", "operator": _operator_name()},
                 **common,
             )
         except Exception as exc:

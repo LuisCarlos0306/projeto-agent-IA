@@ -12,7 +12,7 @@ def test_skill_catalog_loads_backup_validation():
     catalog = load_skill_catalog()
 
     assert catalog["schema_version"] == 1
-    assert catalog["catalog_version"] == "1.2.0"
+    assert catalog["catalog_version"] == "1.3.0"
     assert any(skill["id"] == "backup_validation" for skill in catalog["skills"])
 
 
@@ -22,13 +22,14 @@ def test_backup_validation_is_the_only_active_initial_skill():
     assert [skill["id"] for skill in active] == ["backup_validation"]
 
 
-def test_backup_validation_has_read_only_checks():
+def test_backup_validation_has_mapped_read_only_checks():
+    assert action_is_read_only("backup_validation", "configure_storage_mapping") is True
     assert action_is_read_only("backup_validation", "validate_filesystem") is True
     assert action_is_read_only("backup_validation", "validate_mount") is True
     assert action_is_read_only("backup_validation", "validate_space") is True
-    assert action_is_read_only("backup_validation", "validate_retention") is True
-    assert action_is_read_only("backup_validation", "validate_last_backup") is True
     assert action_is_read_only("backup_validation", "validate_redundancy") is True
+    assert action_is_read_only("backup_validation", "validate_retention") is False
+    assert action_is_read_only("backup_validation", "validate_last_backup") is False
 
 
 def test_mount_script_is_registered_but_not_enabled():
@@ -36,9 +37,10 @@ def test_mount_script_is_registered_but_not_enabled():
     action = get_skill_action("backup_validation", "execute_mount_script")
 
     assert skill is not None
-    assert skill["version"] == "1.2.0"
+    assert skill["version"] == "1.3.0"
     assert "/db/backup/scripts/mount.sh" in skill["dependencies"]["scripts"]
     assert action is not None
+    assert action["label"] == "Solicitar validação da montagem"
     assert action["command"] == "/db/backup/scripts/mount.sh"
     assert action["enabled"] is False
     assert action_requires_approval("backup_validation", "execute_mount_script") is True

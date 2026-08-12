@@ -14,6 +14,7 @@ from app.services.confidence_instrumentation import install_confidence_instrumen
 from app.services.focused_validation import install_focused_validation
 from app.services.hard_job_alarm import install_hard_job_alarm
 from app.services.job_process_guard import install_job_process_guard
+from app.services.mapped_backup_validation import install_mapped_backup_validation
 from app.services.operational_tool_instrumentation import install_operational_tools
 from app.services.ptbr_guard import install_ptbr_guard
 from app.services.worker_cancel_watchdog import _hard_timeout_seconds, install_worker_cancel_watchdog
@@ -29,6 +30,7 @@ install_confidence_instrumentation()
 install_worker_cancel_watchdog()
 install_hard_job_alarm()
 install_job_process_guard()
+install_mapped_backup_validation()
 app = typer.Typer(no_args_is_help=True)
 console = Console()
 
