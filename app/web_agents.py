@@ -20,6 +20,7 @@ from app.web import _operator_name, _require_access, _require_mutation
 
 
 router = APIRouter(prefix="/ui/api/agents", tags=["interface-agents"])
+_BUSY_STATES = {"queued", "running", "cancelling"}
 
 
 class AgentPayload(BaseModel):
@@ -42,6 +43,14 @@ def _service_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=503, detail=f"serviço de agentes indisponível: {type(exc).__name__}: {exc}")
 
 
+def _current_agent(agent_id: str) -> dict[str, Any]:
+    reconcile_agent_statuses(settings=get_settings())
+    item = get_agent(agent_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="agente não encontrado")
+    return item
+
+
 @router.get("")
 def agents(request: Request) -> dict[str, Any]:
     _require_access(request)
@@ -56,12 +65,11 @@ def agents(request: Request) -> dict[str, Any]:
 def agent(agent_id: str, request: Request) -> dict[str, Any]:
     _require_access(request)
     try:
-        reconcile_agent_statuses(settings=get_settings())
-        item = get_agent(agent_id)
+        item = _current_agent(agent_id)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise _service_error(exc) from exc
-    if item is None:
-        raise HTTPException(status_code=404, detail="agente não encontrado")
     return item
 
 
@@ -109,18 +117,64 @@ def toggle(agent_id: str, payload: AgentTogglePayload, request: Request) -> dict
     return {"status": "enabled" if payload.enabled else "disabled", "agent": item}
 
 
-@router.post("/{agent_id}/run-now")
-def run_now(agent_id: str, request: Request) -> dict[str, Any]:
+@router.post("/{agent_id}/start")
+def start(agent_id: str, request: Request) -> dict[str, Any]:
+    """Ativa o agendamento e dispara uma execução imediata pelo Play."""
     _require_mutation(request)
-    if get_agent(agent_id) is None:
-        raise HTTPException(status_code=404, detail="agente não encontrado")
     try:
+        current = _current_agent(agent_id)
+        if str(current.get("last_status") or "") in _BUSY_STATES:
+            raise HTTPException(status_code=409, detail="o agente já possui uma execução em andamento")
+        active = set_agent_enabled(agent_id, True)
         queued = enqueue_agent_job(
             agent_id,
             source="manual",
             advance_schedule=False,
             settings=get_settings(),
         )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {
+        **queued,
+        "status": "queued",
+        "scheduled": True,
+        "agent": active,
+    }
+
+
+@router.post("/{agent_id}/stop")
+def stop(agent_id: str, request: Request) -> dict[str, Any]:
+    """Para somente os próximos ciclos; uma execução já iniciada não é abortada."""
+    _require_mutation(request)
+    try:
+        item = set_agent_enabled(agent_id, False)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {
+        "status": "stopped",
+        "agent": item,
+        "running_execution_continues": str(item.get("last_status") or "") in _BUSY_STATES,
+    }
+
+
+@router.post("/{agent_id}/run-now")
+def run_now(agent_id: str, request: Request) -> dict[str, Any]:
+    """Mantido para compatibilidade: execução única sem alterar o agendamento."""
+    _require_mutation(request)
+    try:
+        current = _current_agent(agent_id)
+        if str(current.get("last_status") or "") in _BUSY_STATES:
+            raise HTTPException(status_code=409, detail="o agente já possui uma execução em andamento")
+        queued = enqueue_agent_job(
+            agent_id,
+            source="manual",
+            advance_schedule=False,
+            settings=get_settings(),
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise _service_error(exc) from exc
     return queued
