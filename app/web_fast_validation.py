@@ -130,6 +130,7 @@ def _enhanced_index() -> str:
         "skills.css",
         "custom-skills.css",
         "agents-v2.css",
+        "agent-flow-icon.css",
     ):
         html = _versioned_stylesheet(html, asset)
     for asset in (
