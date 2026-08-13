@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse
 from app.web import UI_DIR, _require_access
 
 
-ASSET_VERSION = "1.30.29"
+ASSET_VERSION = "1.30.30"
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -129,14 +129,14 @@ def _enhanced_index() -> str:
         "cyber-theme.css",
         "skills.css",
         "custom-skills.css",
-        "agents.css",
+        "agents-v2.css",
     ):
         html = _versioned_stylesheet(html, asset)
     for asset in (
         "fast-validation-ui.js",
         "investigation-confidence.js",
         "skills.js",
-        "agents.js",
+        "agents-v2.js",
         "runtime-health.js",
     ):
         html = _versioned_script(html, asset)
