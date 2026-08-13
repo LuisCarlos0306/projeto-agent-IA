@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_agents_ui_exposes_create_toggle_run_and_skill_binding() -> None:
     script = (ROOT / "app" / "ui" / "agents.js").read_text(encoding="utf-8")
     web = (ROOT / "app" / "web_fast_validation.py").read_text(encoding="utf-8")
+    cache = (ROOT / "app" / "web_ui_cache.py").read_text(encoding="utf-8")
     main = (ROOT / "app" / "web_main.py").read_text(encoding="utf-8")
 
     assert 'data-view="agents"' in script
@@ -19,6 +20,9 @@ def test_agents_ui_exposes_create_toggle_run_and_skill_binding() -> None:
     assert "Executar agora" in script
     assert "/ui/api/agents" in script
     assert '"agents.js"' in web
+    assert "_inject_agent_assets(content)" in cache
+    assert 'agents.js?v={_ASSET_VERSION}' in cache
+    assert 'runtime-health.js?v={_ASSET_VERSION}' in cache
     assert "agents_router" in main
 
 
