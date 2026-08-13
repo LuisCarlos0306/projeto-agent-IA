@@ -52,6 +52,28 @@ def _post_validation_confirmed(action: dict[str, Any]) -> bool:
     return action.get("validated") is True or action.get("verified") is True
 
 
+def _execution_error(job: dict[str, Any], result: dict[str, Any]) -> str:
+    explicit = str(job.get("error") or "").strip()
+    if explicit:
+        return explicit
+    for item in result.get("commands") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            exit_code = int(item.get("exit_code") or 0)
+        except (TypeError, ValueError):
+            continue
+        if exit_code == 0:
+            continue
+        command = str(item.get("command") or "comando da Skill")
+        stderr = str(item.get("stderr") or "").strip()
+        detail = f"Comando '{command}' retornou exit_code={exit_code}."
+        if stderr:
+            detail += f" Detalhe: {stderr[:2000]}"
+        return detail
+    return ""
+
+
 def correction_outcome(result: dict[str, Any], terminal_state: str = "completed") -> tuple[str, str]:
     """Resume a correção separadamente do estado geral da execução."""
     executed = [item for item in result.get("executed_actions") or [] if isinstance(item, dict)]
@@ -124,7 +146,7 @@ def reconcile_agent_statuses(*, settings: Settings | None = None) -> int:
         result = dict(job.get("result") or {})
         final_status = execution_outcome(job, result)
         summary = str(result.get("summary") or "")
-        error = str(job.get("error") or "")
+        error = _execution_error(job, result)
         correction_status, correction_message = correction_outcome(result, state)
 
         record_run_detail(agent_id, job, result)
