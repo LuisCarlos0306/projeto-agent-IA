@@ -15,6 +15,7 @@ from app.services.scheduled_agent_registry import (
     update_agent,
 )
 from app.services.scheduled_agent_scheduler import enqueue_agent_job
+from app.services.scheduled_agent_status import reconcile_agent_statuses
 from app.web import _operator_name, _require_access, _require_mutation
 
 
@@ -45,6 +46,7 @@ def _service_error(exc: Exception) -> HTTPException:
 def agents(request: Request) -> dict[str, Any]:
     _require_access(request)
     try:
+        reconcile_agent_statuses(settings=get_settings())
         return {"agents": list_agents()}
     except Exception as exc:
         raise _service_error(exc) from exc
@@ -54,6 +56,7 @@ def agents(request: Request) -> dict[str, Any]:
 def agent(agent_id: str, request: Request) -> dict[str, Any]:
     _require_access(request)
     try:
+        reconcile_agent_statuses(settings=get_settings())
         item = get_agent(agent_id)
     except Exception as exc:
         raise _service_error(exc) from exc
