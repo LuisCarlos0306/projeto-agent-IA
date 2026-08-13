@@ -57,12 +57,23 @@ def _inject_adaptive_assets(content: str) -> str:
     return content
 
 
+def _inject_agent_assets(content: str) -> str:
+    agents = f'<script src="/ui/assets/agents.js?v={_ASSET_VERSION}" defer></script>'
+    runtime = f'<script src="/ui/assets/runtime-health.js?v={_ASSET_VERSION}" defer></script>'
+    if "agents.js" not in content:
+        content = content.replace("</body>", f"  {agents}\n</body>")
+    if "runtime-health.js" not in content:
+        content = content.replace("</body>", f"  {runtime}\n</body>")
+    return content
+
+
 @router.get("/ui", include_in_schema=False, response_class=HTMLResponse)
 @router.get("/ui/", include_in_schema=False, response_class=HTMLResponse)
 def versioned_interface(request: Request) -> HTMLResponse:
     _require_access(request)
     content = (_UI_DIR / "index.html").read_text(encoding="utf-8")
     content = re.sub(r"([?&]v=)[0-9]+(?:\.[0-9]+){1,3}", rf"\g<1>{_ASSET_VERSION}", content)
+    content = _inject_agent_assets(content)
     content = _inject_topology_assets(content)
     content = _inject_operator_assets(content)
     content = _inject_adaptive_assets(content)
