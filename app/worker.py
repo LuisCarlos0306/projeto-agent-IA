@@ -18,6 +18,7 @@ from app.services.job_process_guard import install_job_process_guard
 from app.services.mapped_backup_validation import install_mapped_backup_validation
 from app.services.operational_tool_instrumentation import install_operational_tools
 from app.services.ptbr_guard import install_ptbr_guard
+from app.services.scheduled_agent_scheduler import start_agent_scheduler
 from app.services.worker_cancel_watchdog import _hard_timeout_seconds, install_worker_cancel_watchdog
 from app.services.jobs import get_job, run_worker_once, worker_loop
 from app.services.secrets import secret_backend_status
@@ -56,6 +57,7 @@ def run(
         f"StrictHostKeyChecking: {settings.ssh_strict_host_key_checking}\n"
         f"Coleta focada: {focused}\n"
         f"Skills personalizadas: leitura controlada\n"
+        f"Agentes agendados: habilitados no modo contínuo\n"
         f"Idioma das mensagens: pt-BR\n"
         f"Confiança por evidências: ativa\n"
         f"Cancelamento forçado: {cancel_grace}s\n"
@@ -67,6 +69,7 @@ def run(
         result = run_worker_once(settings=settings, block_seconds=block_seconds)
         console.print(json.dumps(result or {"status": "empty"}, ensure_ascii=False, indent=2, default=str))
         return
+    start_agent_scheduler(settings=settings)
     worker_loop(settings=settings)
 
 
