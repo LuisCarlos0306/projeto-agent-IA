@@ -104,6 +104,17 @@ def _clean_mode(value: str) -> str:
     return mode
 
 
+def _clean_configured_command(command: str) -> str:
+    raw = str(command or "").strip()
+    if not raw:
+        raise ValueError("comando vazio")
+    if len(raw) > 1000:
+        raise ValueError("comando excede 1000 caracteres")
+    if "\x00" in raw or "\n" in raw or "\r" in raw:
+        raise ValueError("o comando deve ser informado em uma única linha")
+    return raw
+
+
 def _validate_read_only_args(parts: list[str]) -> None:
     binary = parts[0]
     lowered = [item.casefold() for item in parts[1:]]
@@ -122,19 +133,25 @@ def _validate_read_only_args(parts: list[str]) -> None:
     if binary == "dmesg" and any(item in {"-c", "--clear", "--read-clear"} for item in lowered):
         raise ValueError("dmesg não pode limpar o buffer do kernel")
     if binary == "systemctl" and (len(parts) < 2 or parts[1].casefold() not in _SAFE_SYSTEMCTL):
-        raise ValueError("systemctl em skill personalizada aceita somente consultas de status")
+        raise ValueError("systemctl em Skill de Leitura aceita somente consultas de status")
     if binary == "service" and (len(parts) != 3 or parts[2].casefold() != "status"):
-        raise ValueError("service em skill personalizada aceita somente: service <nome> status")
+        raise ValueError("service em Skill de Leitura aceita somente: service <nome> status")
 
 
-def validate_custom_command(command: str) -> str:
-    raw = str(command or "").strip()
-    if not raw:
-        raise ValueError("comando vazio")
-    if len(raw) > 500:
-        raise ValueError("comando excede 500 caracteres")
+def validate_custom_command(command: str, mode: str = "read_only") -> str:
+    """Valida uma ação cadastrada de acordo com a permissão da Skill.
+
+    Diagnóstico e Correção podem registrar comandos livres em uma única linha. Isso
+    não significa autorização de execução: o runner separa comandos comprovadamente
+    somente leitura das ações que devem permanecer aguardando aprovação/política.
+    """
+    raw = _clean_configured_command(command)
+    clean_mode = _clean_mode(mode)
+    if clean_mode != "read_only":
+        return raw
+
     if any(token in raw for token in _FORBIDDEN_SYNTAX):
-        raise ValueError("pipes, redirecionamentos, substituições e encadeamentos não são permitidos")
+        raise ValueError("pipes, redirecionamentos, substituições e encadeamentos não são permitidos em Skill de Leitura")
     try:
         parts = shlex.split(raw)
     except ValueError as exc:
@@ -143,7 +160,7 @@ def validate_custom_command(command: str) -> str:
         raise ValueError("comando vazio")
     binary = parts[0]
     if binary not in _SAFE_BINARIES:
-        raise ValueError(f"comando não permitido em skill personalizada: {binary}")
+        raise ValueError(f"comando não permitido em Skill de Leitura: {binary}")
     _validate_read_only_args(parts)
     allowed, reason, spec = validate_command(raw)
     if not allowed or spec is None or not spec.read_only:
@@ -173,7 +190,7 @@ def validate_script_path(script: str) -> str:
 def _normalized_payload(name: str, commands: list[str], scripts: list[str], description: str, mode: str) -> dict[str, Any]:
     clean_name = _clean_name(name)
     clean_mode = _clean_mode(mode)
-    clean_commands = [validate_custom_command(item) for item in commands if str(item or "").strip()]
+    clean_commands = [validate_custom_command(item, clean_mode) for item in commands if str(item or "").strip()]
     clean_scripts = [validate_script_path(item) for item in scripts if str(item or "").strip()]
     if not clean_commands and not clean_scripts:
         raise ValueError("informe pelo menos um comando ou script")

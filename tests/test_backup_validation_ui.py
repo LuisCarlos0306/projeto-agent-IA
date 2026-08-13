@@ -39,8 +39,9 @@ def test_skills_ui_uses_unified_action_builder_and_visible_target_execution():
     assert "renderSkill(saved)" in script
 
     assert 'method: skillId ? "PUT" : "POST"' in script
-    assert "Scripts aguardando aprovação" in script
-    assert "Nenhum script foi executado nesta etapa" in script
+    assert "Ações protegidas" in script
+    assert "Comandos não seguros e scripts não foram executados automaticamente" in script
+    assert "pending_commands" in script
     assert "mount_point" not in script
     assert "redundancy_path" not in script
     assert "backup_path" not in script

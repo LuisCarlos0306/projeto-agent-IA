@@ -189,7 +189,7 @@
           <label class="agent-enabled-field"><span>Estado inicial</span><span class="agent-checkbox"><input name="enabled" type="checkbox" ${agent?.enabled !== false ? "checked" : ""}> Habilitado</span></label>
         </div>
         <div class="agent-safety-note">
-          <strong>Automação segura:</strong> comandos de leitura/diagnóstico podem executar pela agenda. Scripts corretivos cadastrados na Skill continuam aguardando aprovação e não são disparados automaticamente.
+          <strong>Automação segura:</strong> a Skill pode conter comandos e scripts definidos por você, mas o Agente executa automaticamente apenas comandos comprovadamente somente leitura. As demais ações ficam aguardando aprovação ou são bloqueadas pela política do ambiente.
         </div>
         <div class="agent-editor-actions">
           <button type="button" class="ghost-button" data-close-agent-detail>Cancelar</button>

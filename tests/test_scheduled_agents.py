@@ -26,14 +26,15 @@ def test_agents_ui_exposes_create_toggle_run_and_skill_binding() -> None:
     assert "agents_router" in main
 
 
-def test_agents_keep_corrective_scripts_out_of_automatic_execution() -> None:
+def test_agents_keep_non_read_only_actions_out_of_automatic_execution() -> None:
     script = (ROOT / "app" / "ui" / "agents.js").read_text(encoding="utf-8")
     registry = (ROOT / "app" / "services" / "scheduled_agent_registry.py").read_text(encoding="utf-8")
     runner = (ROOT / "app" / "services" / "custom_skill_runner.py").read_text(encoding="utf-8")
 
-    assert "Scripts corretivos cadastrados na Skill continuam aguardando aprovação" in script
+    assert "executa automaticamente apenas comandos comprovadamente somente leitura" in script
     assert '"automatic_correction": False' in registry
     assert '"status": "pending_approval"' in runner
+    assert '"status": "blocked_by_policy"' in runner
     assert '"enabled": False' in runner
     assert '"executed_actions": []' in runner
 

@@ -86,7 +86,7 @@ def test_custom_skill_registry_create_edit_list_get_delete(tmp_path: Path):
     assert list_custom_skills(path) == []
 
 
-def test_custom_skill_rejects_mutating_or_shell_commands():
+def test_custom_skill_rejects_mutating_or_shell_commands_in_read_only_mode():
     for command in (
         "rm -rf /tmp/teste",
         "mount -a",
@@ -101,6 +101,22 @@ def test_custom_skill_rejects_mutating_or_shell_commands():
     ):
         with pytest.raises(ValueError):
             validate_custom_command(command)
+
+
+def test_diagnostic_and_correction_can_register_commands_outside_read_only_catalog(tmp_path: Path):
+    assert validate_custom_command("mount /mnt/backup_check", "diagnostic") == "mount /mnt/backup_check"
+    assert validate_custom_command("systemctl restart sshd", "correction") == "systemctl restart sshd"
+    assert validate_custom_command("df -h | grep backup", "correction") == "df -h | grep backup"
+
+    path = tmp_path / "custom-skills.json"
+    skill = create_custom_skill(
+        "Montagem controlada",
+        ["mount /mnt/backup_check", "systemctl restart autofs"],
+        mode="correction",
+        path=path,
+    )
+    assert skill["mode"] == "correction"
+    assert skill["commands"] == ["mount /mnt/backup_check", "systemctl restart autofs"]
 
 
 def test_custom_skill_accepts_read_only_diagnostics():
@@ -136,13 +152,13 @@ def test_read_only_skill_rejects_scripts(tmp_path: Path):
         )
 
 
-def test_custom_skill_runner_executes_commands_but_never_scripts_without_approval():
+def test_custom_skill_runner_executes_only_safe_commands_and_keeps_corrections_pending():
     fake = FakeExecutor()
     skill = {
         "id": "abc123",
         "name": "Validar Filesystem",
         "description": "",
-        "commands": ["df -h", "findmnt"],
+        "commands": ["df -h", "mount /mnt/backup_check"],
         "scripts": ["/db/backup/scripts/mount.sh"],
         "mode": "correction",
     }
@@ -156,18 +172,14 @@ def test_custom_skill_runner_executes_commands_but_never_scripts_without_approva
     assert result["status"] == "attention"
     assert result["mode"] == "correction"
     assert result["target"] == "172.27.232.212"
-    assert [item[0] for item in fake.commands] == ["df -h", "findmnt"]
+    assert [item[0] for item in fake.commands] == ["df -h"]
     assert all(item[2] is False for item in fake.commands)
     assert fake.connected and fake.closed
     assert result["approval_required"] is True
-    assert result["scripts"] == [
-        {
-            "path": "/db/backup/scripts/mount.sh",
-            "risk": "approval_required",
-            "enabled": False,
-            "status": "pending_approval",
-        }
-    ]
+    assert result["pending_commands"][0]["command"] == "mount /mnt/backup_check"
+    assert result["pending_commands"][0]["status"] == "pending_approval"
+    assert result["scripts"][0]["path"] == "/db/backup/scripts/mount.sh"
+    assert result["scripts"][0]["status"] == "pending_approval"
     assert result["executed_actions"] == []
 
 
