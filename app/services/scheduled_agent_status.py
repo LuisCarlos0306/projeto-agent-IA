@@ -6,6 +6,7 @@ from app.core.settings import Settings, get_settings
 from app.db.agent_models import ScheduledAgentORM
 from app.db.base import SessionLocal, ensure_database_schema
 from app.services.scheduled_agent_registry import record_agent_history, update_agent_runtime
+from app.services.scheduled_agent_run_log import execution_outcome, record_run_detail
 
 
 def _action_text(action: dict[str, Any]) -> str:
@@ -52,7 +53,7 @@ def _post_validation_confirmed(action: dict[str, Any]) -> bool:
 
 
 def correction_outcome(result: dict[str, Any], terminal_state: str = "completed") -> tuple[str, str]:
-    """Resume o resultado corretivo sem inferir sucesso sem evidência de pós-validação."""
+    """Resume a correção separadamente do estado geral da execução."""
     executed = [item for item in result.get("executed_actions") or [] if isinstance(item, dict)]
     if executed:
         mount_actions = [item for item in executed if _is_mount_action(item)]
@@ -119,11 +120,14 @@ def reconcile_agent_statuses(*, settings: Settings | None = None) -> int:
             if state and state != "queued":
                 update_agent_runtime(agent_id, status=state)
             continue
+
         result = dict(job.get("result") or {})
-        final_status = str(result.get("status") or state)
+        final_status = execution_outcome(job, result)
         summary = str(result.get("summary") or "")
         error = str(job.get("error") or "")
         correction_status, correction_message = correction_outcome(result, state)
+
+        record_run_detail(agent_id, job, result)
         update_agent_runtime(
             agent_id,
             status=final_status,
