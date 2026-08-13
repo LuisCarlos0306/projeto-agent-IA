@@ -32,11 +32,14 @@ def _current_execution(agent: dict[str, Any], *, settings: Settings) -> dict[str
     }
 
 
-def enrich_agent(agent: dict[str, Any], *, settings: Settings | None = None) -> dict[str, Any]:
-    settings = settings or get_settings()
+def _enrich_with_details(
+    agent: dict[str, Any],
+    details: dict[str, dict[str, Any]],
+    *,
+    settings: Settings,
+) -> dict[str, Any]:
     payload = dict(agent)
     history = [dict(item) for item in payload.get("history") or []]
-    details = run_detail_map([str(item.get("job_id") or "") for item in history])
     for item in history:
         item.update(details.get(str(item.get("job_id") or ""), {}))
     payload["history"] = history
@@ -51,6 +54,19 @@ def enrich_agent(agent: dict[str, Any], *, settings: Settings | None = None) -> 
     return payload
 
 
+def enrich_agent(agent: dict[str, Any], *, settings: Settings | None = None) -> dict[str, Any]:
+    settings = settings or get_settings()
+    job_ids = [str(item.get("job_id") or "") for item in agent.get("history") or []]
+    return _enrich_with_details(agent, run_detail_map(job_ids), settings=settings)
+
+
 def enrich_agents(agents: list[dict[str, Any]], *, settings: Settings | None = None) -> list[dict[str, Any]]:
     settings = settings or get_settings()
-    return [enrich_agent(item, settings=settings) for item in agents]
+    job_ids = [
+        str(item.get("job_id") or "")
+        for agent in agents
+        for item in agent.get("history") or []
+        if item.get("job_id")
+    ]
+    details = run_detail_map(job_ids)
+    return [_enrich_with_details(item, details, settings=settings) for item in agents]
