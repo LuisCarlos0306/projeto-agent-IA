@@ -3,7 +3,9 @@
   let skills = [];
   let loaded = false;
   let selectedAgentId = null;
+  let refreshTimer = null;
   const liveRuns = new Map();
+  const BUSY_STATES = new Set(["queued", "running", "cancelling"]);
 
   const safe = (value) => String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -116,7 +118,7 @@
               <div>
                 <p class="eyebrow">AUTOMAÇÃO POR SKILL</p>
                 <h3>Agentes</h3>
-                <p>Vincule uma Skill a um servidor e acompanhe execução, correção e histórico.</p>
+                <p>Play ativa e executa imediatamente; depois o Agente segue sozinho no intervalo configurado.</p>
               </div>
               <button class="primary-button" id="create-scheduled-agent" type="button">+ Criar Agente</button>
             </div>
@@ -131,7 +133,7 @@
 
   function renderHistory(history = [], compact = false) {
     const rows = (history || []).slice(0, 5);
-    if (!rows.length) return '<div class="agent-history-empty">Nenhuma validação registrada.</div>';
+    if (!rows.length) return '<div class="agent-history-empty">Nenhuma validação concluída.</div>';
     return `<div class="agent-history-list ${compact ? "compact" : ""}">
       ${rows.map((row) => `
         <div class="agent-history-row">
@@ -149,8 +151,24 @@
   }
 
   function liveStatus(agent) {
-    return liveRuns.get(agent.id) || null;
+    const browserLive = liveRuns.get(agent.id);
+    if (browserLive) return browserLive;
+    if (!BUSY_STATES.has(String(agent.last_status || ""))) return null;
+    const status = String(agent.last_status || "running");
+    return {
+      status,
+      detail: status === "queued"
+        ? "Execução automática aguardando o Worker..."
+        : status === "cancelling"
+          ? "Execução em processo de encerramento..."
+          : "Agente executando a Skill no servidor...",
+      percent: null,
+      jobId: agent.last_job_id || null,
+      automatic: true,
+    };
   }
+
+  const isBusy = (agent) => Boolean(liveStatus(agent));
 
   function renderGrid() {
     const grid = document.querySelector("#agents-grid");
@@ -163,16 +181,14 @@
     grid.innerHTML = agents.map((agent) => {
       const live = liveStatus(agent);
       const effectiveStatus = live?.status || agent.last_status;
+      const busy = Boolean(live);
       return `
         <article class="agent-card ${agent.enabled ? "enabled" : "disabled"}" data-agent-id="${safe(agent.id)}">
           <div class="agent-card-layout">
             <div class="agent-card-main">
               <div class="agent-card-head">
                 <div class="agent-card-icon">◈</div>
-                <div class="agent-card-copy">
-                  <p class="eyebrow">AGENTE</p>
-                  <h4>${safe(agent.name)}</h4>
-                </div>
+                <div class="agent-card-copy"><p class="eyebrow">AGENTE</p><h4>${safe(agent.name)}</h4></div>
                 <button class="agent-live-indicator ${agent.enabled ? "enabled" : "disabled"}" type="button" data-toggle-agent="${safe(agent.id)}" data-enabled="${agent.enabled ? "1" : "0"}" title="${agent.enabled ? "Desativar agendamento" : "Ativar agendamento"}">
                   <span class="agent-indicator-dot"></span>${agent.enabled ? "Ativo" : "Parado"}
                 </button>
@@ -187,23 +203,23 @@
                 <div><span>Servidor</span><strong>${safe(agent.target)}</strong></div>
                 <div><span>Frequência</span><strong>${safe(intervalLabel(agent.interval_minutes))}</strong></div>
                 <div><span>Status</span><strong class="status-text ${safe(statusClass(effectiveStatus))}">${safe(statusLabel(effectiveStatus))}</strong></div>
-                <div><span>Última execução</span><strong>${safe(formatDate(agent.last_run_at))}</strong></div>
-                <div><span>Próxima execução</span><strong>${agent.enabled ? safe(formatDate(agent.next_run_at)) : "—"}</strong></div>
+                <div><span>Última execução concluída</span><strong>${safe(formatDate(agent.last_run_at))}</strong></div>
+                <div><span>Próximo ciclo</span><strong>${agent.enabled ? safe(formatDate(agent.next_run_at)) : "—"}</strong></div>
               </div>
 
-              ${live ? `<div class="agent-live-run"><span class="agent-live-spinner"></span><div><strong>${safe(statusLabel(live.status))}</strong><p>${safe(live.detail || "Aguardando retorno do Worker...")}</p>${live.percent != null ? `<small>${safe(live.percent)}%</small>` : ""}</div></div>` : ""}
-              ${agent.last_error ? `<div class="agent-card-error">${safe(agent.last_error)}</div>` : ""}
+              ${live ? `<div class="agent-live-run"><span class="agent-live-spinner"></span><div><strong>${safe(statusLabel(live.status))}</strong><p>${safe(live.detail)}</p>${live.percent != null ? `<small>${safe(live.percent)}%</small>` : ""}</div></div>` : ""}
+              ${agent.last_error && !busy ? `<div class="agent-card-error">${safe(agent.last_error)}</div>` : ""}
               ${agent.skill_missing ? '<div class="agent-card-error">A Skill vinculada não existe mais.</div>' : ""}
 
               <div class="agent-card-actions agent-icon-actions">
-                <button class="agent-control play" type="button" data-run-agent="${safe(agent.id)}" title="Executar agora" aria-label="Executar agente agora" ${agent.skill_missing || live ? "disabled" : ""}>▶</button>
-                <button class="agent-control stop" type="button" data-toggle-agent="${safe(agent.id)}" data-enabled="1" title="Parar agendamento" aria-label="Parar agendamento" ${!agent.enabled ? "disabled" : ""}>■</button>
-                <span class="agent-control-hint">Play executa agora · Stop para o agendamento</span>
+                <button class="agent-control play" type="button" data-run-agent="${safe(agent.id)}" title="Ativar e executar agora" aria-label="Ativar e executar agente agora" ${agent.skill_missing || busy ? "disabled" : ""}>▶</button>
+                <button class="agent-control stop" type="button" data-stop-agent="${safe(agent.id)}" title="Parar próximos ciclos" aria-label="Parar agendamento" ${!agent.enabled ? "disabled" : ""}>■</button>
+                <span class="agent-control-hint">Play ativa + executa agora · Stop pausa os próximos ciclos</span>
               </div>
             </div>
 
             <aside class="agent-mini-history">
-              <div class="agent-history-title"><span>HISTÓRICO</span><strong>Últimas 5 validações</strong></div>
+              <div class="agent-history-title"><span>HISTÓRICO</span><strong>Últimas 5 validações concluídas</strong></div>
               ${renderHistory(agent.history || [], true)}
             </aside>
           </div>
@@ -226,7 +242,7 @@
     const preset = presets.includes(interval) ? String(interval) : "custom";
     detail.hidden = false;
     detail.innerHTML = `
-      <div class="agent-detail-head"><div><p class="eyebrow">${editing ? "EDITAR AGENTE" : "NOVO AGENTE"}</p><h3>${editing ? safe(agent.name) : "Criar Agente"}</h3><p>A Skill define o que fazer; o Agente define onde e quando executar.</p></div></div>
+      <div class="agent-detail-head"><div><p class="eyebrow">${editing ? "EDITAR AGENTE" : "NOVO AGENTE"}</p><h3>${editing ? safe(agent.name) : "Criar Agente"}</h3><p>A Skill define o que fazer; o Agente define onde e a frequência.</p></div></div>
       <form id="agent-editor-form" data-agent-id="${safe(agent?.id || "")}" class="agent-editor-form">
         <div class="agent-editor-grid">
           <label><span>Nome do agente</span><input name="name" required maxlength="120" value="${safe(agent?.name || "")}" placeholder="Ex.: Monitor Backup Cliente A"></label>
@@ -245,7 +261,7 @@
           <label id="agent-custom-interval-field" ${preset !== "custom" ? "hidden" : ""}><span>Intervalo personalizado (minutos)</span><input name="custom_interval" type="number" min="1" max="10080" value="${safe(interval)}"></label>
           <label class="agent-enabled-field"><span>Estado inicial</span><span class="agent-checkbox"><input name="enabled" type="checkbox" ${agent?.enabled !== false ? "checked" : ""}> Ativo</span></label>
         </div>
-        <div class="agent-safety-note"><strong>Execução controlada:</strong> o Agente usa a Skill como referência. Ações corretivas só podem aparecer como sucesso depois da execução autorizada e da pós-validação.</div>
+        <div class="agent-safety-note"><strong>Execução controlada:</strong> o Play ativa o agendamento e executa imediatamente. Ações corretivas só aparecem como sucesso depois da execução autorizada e da pós-validação.</div>
         <div class="agent-editor-actions"><button type="button" class="ghost-button" data-close-agent-detail>Cancelar</button><button type="submit" class="primary-button">${editing ? "Salvar alterações" : "Criar Agente"}</button></div>
         <div id="agent-editor-message" class="agent-message" hidden></div>
       </form>`;
@@ -272,27 +288,42 @@
             <div><span>Servidor</span><strong>${safe(agent.target)}</strong></div>
             <div><span>Frequência</span><strong>${safe(intervalLabel(agent.interval_minutes))}</strong></div>
             <div><span>Status da validação</span><strong class="status-text ${safe(statusClass(live?.status || agent.last_status))}">${safe(statusLabel(live?.status || agent.last_status))}</strong></div>
-            <div><span>Última execução</span><strong>${safe(formatDate(agent.last_run_at))}</strong></div>
-            <div><span>Próxima execução</span><strong>${agent.enabled ? safe(formatDate(agent.next_run_at)) : "—"}</strong></div>
+            <div><span>Última execução concluída</span><strong>${safe(formatDate(agent.last_run_at))}</strong></div>
+            <div><span>Próximo ciclo</span><strong>${agent.enabled ? safe(formatDate(agent.next_run_at)) : "—"}</strong></div>
           </div>
 
-          ${live ? `<div class="agent-live-run detail"><span class="agent-live-spinner"></span><div><strong>${safe(statusLabel(live.status))}</strong><p>${safe(live.detail || "Execução em andamento...")}</p><small>${safe(live.percent ?? 0)}%</small></div></div>` : ""}
-          ${agent.last_summary ? `<div class="agent-last-summary"><strong>Último resultado da validação</strong><p>${safe(agent.last_summary)}</p></div>` : ""}
-          ${latest ? `<div class="agent-correction-result ${safe(correctionClass(latest.correction_status))}"><span>RESULTADO DA CORREÇÃO</span><strong>${safe(correctionLabel(latest.correction_status))}</strong><p>${safe(latest.correction_message || "")}</p></div>` : ""}
+          ${live ? `<div class="agent-live-run detail"><span class="agent-live-spinner"></span><div><strong>${safe(statusLabel(live.status))}</strong><p>${safe(live.detail)}</p>${live.percent != null ? `<small>${safe(live.percent)}%</small>` : ""}</div></div>` : ""}
+          ${!live && agent.last_summary ? `<div class="agent-last-summary"><strong>Último resultado da validação</strong><p>${safe(agent.last_summary)}</p></div>` : ""}
+          ${!live && latest ? `<div class="agent-correction-result ${safe(correctionClass(latest.correction_status))}"><span>RESULTADO DA CORREÇÃO</span><strong>${safe(correctionLabel(latest.correction_status))}</strong><p>${safe(latest.correction_message || "")}</p></div>` : ""}
           ${transientMessage ? `<div class="agent-message success">${safe(transientMessage)}</div>` : ""}
 
           <div class="agent-detail-actions agent-icon-actions">
-            <button class="agent-control play" type="button" data-run-agent="${safe(agent.id)}" title="Executar agora" aria-label="Executar agente agora" ${agent.skill_missing || live ? "disabled" : ""}>▶</button>
-            <button class="agent-control stop" type="button" data-toggle-agent="${safe(agent.id)}" data-enabled="1" title="Parar agendamento" aria-label="Parar agendamento" ${!agent.enabled ? "disabled" : ""}>■</button>
+            <button class="agent-control play" type="button" data-run-agent="${safe(agent.id)}" title="Ativar e executar agora" aria-label="Ativar e executar agente agora" ${agent.skill_missing || live ? "disabled" : ""}>▶</button>
+            <button class="agent-control stop" type="button" data-stop-agent="${safe(agent.id)}" title="Parar próximos ciclos" aria-label="Parar agendamento" ${!agent.enabled ? "disabled" : ""}>■</button>
             <button type="button" class="secondary-button" data-edit-agent="${safe(agent.id)}">Editar</button>
             <button type="button" class="ghost-button" data-close-agent-detail>Fechar</button>
           </div>
           <div id="agent-run-message" class="agent-message" hidden></div>
         </div>
 
-        <aside class="agent-detail-history"><div class="agent-history-title"><span>LOG</span><strong>Últimas 5 validações</strong></div>${renderHistory(agent.history || [])}</aside>
+        <aside class="agent-detail-history"><div class="agent-history-title"><span>LOG</span><strong>Últimas 5 validações concluídas</strong></div>${renderHistory(agent.history || [])}</aside>
       </div>`;
     detail.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function refreshSelectedDetail() {
+    if (!selectedAgentId) return;
+    const detail = document.querySelector("#agent-detail");
+    if (!detail || detail.hidden || detail.querySelector("#agent-editor-form")) return;
+    const selected = agents.find((item) => item.id === selectedAgentId);
+    if (selected) detailView(selected);
+  }
+
+  async function refreshAgents() {
+    const payload = await requestJson("/ui/api/agents");
+    agents = payload.agents || [];
+    renderGrid();
+    refreshSelectedDetail();
   }
 
   async function loadAgents(force = false) {
@@ -300,19 +331,27 @@
     ensureShell();
     const grid = document.querySelector("#agents-grid");
     try {
-      const [agentPayload, skillPayload] = await Promise.all([requestJson("/ui/api/agents"), requestJson("/ui/api/skills/custom")]);
+      const [agentPayload, skillPayload] = await Promise.all([
+        requestJson("/ui/api/agents"),
+        requestJson("/ui/api/skills/custom"),
+      ]);
       agents = agentPayload.agents || [];
       skills = skillPayload.skills || [];
       renderGrid();
       loaded = true;
-      if (selectedAgentId) {
-        const selected = agents.find((item) => item.id === selectedAgentId);
-        const detail = document.querySelector("#agent-detail");
-        if (selected && detail && !detail.hidden && !detail.querySelector("#agent-editor-form")) detailView(selected);
-      }
+      refreshSelectedDetail();
     } catch (error) {
       if (grid) grid.innerHTML = `<div class="agents-empty"><strong>Falha ao carregar agentes</strong><span>${safe(error.message)}</span></div>`;
     }
+  }
+
+  function startAutoRefresh() {
+    if (refreshTimer) return;
+    refreshTimer = window.setInterval(() => {
+      const view = document.querySelector("#view-agents");
+      if (!view?.classList.contains("active") || document.visibilityState !== "visible") return;
+      refreshAgents().catch(() => {});
+    }, 2000);
   }
 
   async function submitEditor(form) {
@@ -320,7 +359,13 @@
     const agentId = form.dataset.agentId;
     const preset = String(data.get("interval_preset") || "30");
     const interval = preset === "custom" ? Number(data.get("custom_interval") || 30) : Number(preset);
-    const body = { name: String(data.get("name") || "").trim(), skill_id: String(data.get("skill_id") || "").trim(), target: String(data.get("target") || "").trim(), interval_minutes: interval, enabled: data.get("enabled") === "on" };
+    const body = {
+      name: String(data.get("name") || "").trim(),
+      skill_id: String(data.get("skill_id") || "").trim(),
+      target: String(data.get("target") || "").trim(),
+      interval_minutes: interval,
+      enabled: data.get("enabled") === "on",
+    };
     const button = form.querySelector('button[type="submit"]');
     const message = form.querySelector("#agent-editor-message");
     button.disabled = true;
@@ -339,23 +384,30 @@
 
   async function toggleAgent(agentId, currentlyEnabled) {
     await requestJson(`/ui/api/agents/${encodeURIComponent(agentId)}/toggle`, { method: "POST", body: { enabled: !currentlyEnabled } });
-    await loadAgents(true);
+    await refreshAgents();
     const current = agents.find((item) => item.id === agentId);
-    if (current && selectedAgentId === agentId) detailView(current, current.enabled ? "Agendamento ativado." : "Agendamento parado.");
+    if (current && selectedAgentId === agentId) detailView(current, current.enabled ? "Agendamento ativado. O próximo ciclo seguirá o intervalo configurado." : "Agendamento parado.");
+  }
+
+  async function stopAgent(agentId) {
+    const response = await requestJson(`/ui/api/agents/${encodeURIComponent(agentId)}/stop`, { method: "POST" });
+    await refreshAgents();
+    const current = agents.find((item) => item.id === agentId);
+    if (current && selectedAgentId === agentId) {
+      detailView(current, response.running_execution_continues ? "Agendamento parado. A execução atual continuará até finalizar." : "Agendamento parado.");
+    }
   }
 
   function updateLive(agentId, job) {
     liveRuns.set(agentId, {
       status: String(job.status || "running"),
       detail: String(job.current_phase?.detail || "Aguardando retorno do Worker..."),
-      percent: Number(job.percent || 0),
+      percent: job.percent == null ? null : Number(job.percent),
       jobId: job.job_id,
+      automatic: false,
     });
     renderGrid();
-    if (selectedAgentId === agentId) {
-      const current = agents.find((item) => item.id === agentId);
-      if (current) detailView(current);
-    }
+    refreshSelectedDetail();
   }
 
   async function pollAgentJob(agentId, jobId) {
@@ -364,27 +416,35 @@
       updateLive(agentId, job);
       if (["completed", "failed", "cancelled"].includes(String(job.status || ""))) {
         liveRuns.delete(agentId);
-        await loadAgents(true);
+        await refreshAgents();
         const current = agents.find((item) => item.id === agentId);
-        if (current && selectedAgentId === agentId) detailView(current, job.status === "completed" ? "Execução finalizada. Consulte o resultado da correção e o histórico." : `Execução ${statusLabel(job.status).toLowerCase()}.`);
+        if (current && selectedAgentId === agentId) {
+          detailView(current, job.status === "completed" ? "Execução finalizada. O log foi registrado e o próximo ciclo permanece agendado." : `Execução ${statusLabel(job.status).toLowerCase()}.`);
+        }
         return job;
       }
       await sleep(1000);
     }
     liveRuns.delete(agentId);
-    await loadAgents(true);
+    await refreshAgents();
     throw new Error("Tempo máximo de acompanhamento excedido.");
   }
 
   async function runAgent(agentId) {
     if (liveRuns.has(agentId)) return;
-    const queued = await requestJson(`/ui/api/agents/${encodeURIComponent(agentId)}/run-now`, { method: "POST" });
+    const queued = await requestJson(`/ui/api/agents/${encodeURIComponent(agentId)}/start`, { method: "POST" });
+    if (queued.agent) {
+      const index = agents.findIndex((item) => item.id === agentId);
+      const updated = { ...queued.agent, last_status: queued.status, last_job_id: queued.job_id };
+      if (index >= 0) agents[index] = updated;
+    }
     updateLive(agentId, queued);
+    await refreshAgents();
     try {
       await pollAgentJob(agentId, queued.job_id);
     } catch (error) {
       liveRuns.delete(agentId);
-      await loadAgents(true);
+      await refreshAgents();
       const message = document.querySelector("#agent-run-message");
       if (message) {
         message.hidden = false;
@@ -400,43 +460,58 @@
     const agent = agents.find((item) => item.id === agentId);
     if (!agent || !window.confirm(`Apagar o agente “${agent.name}”?`)) return;
     await requestJson(`/ui/api/agents/${encodeURIComponent(agentId)}`, { method: "DELETE" });
+    liveRuns.delete(agentId);
     if (selectedAgentId === agentId) selectedAgentId = null;
     const detail = document.querySelector("#agent-detail");
     if (detail) detail.hidden = true;
-    await loadAgents(true);
+    await refreshAgents();
   }
 
   document.addEventListener("DOMContentLoaded", () => {
     ensureShell();
+    startAutoRefresh();
+
     document.querySelector("#view-agents")?.addEventListener("click", (event) => {
       if (event.target.closest("#create-scheduled-agent")) return editor();
+
       const edit = event.target.closest("[data-edit-agent]");
       if (edit) {
         const agent = agents.find((item) => item.id === edit.dataset.editAgent);
         if (agent) editor(agent);
         return;
       }
+
+      const stop = event.target.closest("[data-stop-agent]");
+      if (stop) {
+        stopAgent(stop.dataset.stopAgent).catch((error) => window.alert(error.message));
+        return;
+      }
+
       const toggle = event.target.closest("[data-toggle-agent]");
       if (toggle) {
         toggleAgent(toggle.dataset.toggleAgent, toggle.dataset.enabled === "1").catch((error) => window.alert(error.message));
         return;
       }
+
       const run = event.target.closest("[data-run-agent]");
       if (run) {
         runAgent(run.dataset.runAgent).catch((error) => window.alert(error.message));
         return;
       }
+
       const remove = event.target.closest("[data-delete-agent]");
       if (remove) {
         deleteAgent(remove.dataset.deleteAgent).catch((error) => window.alert(error.message));
         return;
       }
+
       if (event.target.closest("[data-close-agent-detail]")) {
         selectedAgentId = null;
         const detail = document.querySelector("#agent-detail");
         if (detail) detail.hidden = true;
         return;
       }
+
       const card = event.target.closest(".agent-card");
       if (card && !event.target.closest("button")) {
         const agent = agents.find((item) => item.id === card.dataset.agentId);
