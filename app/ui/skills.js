@@ -163,7 +163,7 @@
           </div>
         </div>
         <div class="skill-warning custom-mode-warning">
-          <strong>Política de execução:</strong> comandos são sempre validados como consulta segura. Scripts devem usar caminho absoluto e continuam protegidos por aprovação operacional.
+          <strong>Política de execução:</strong> Leitura aceita apenas consultas seguras. Diagnóstico e Correção podem cadastrar comandos e scripts definidos por você; somente ações comprovadamente de leitura executam automaticamente. As demais aguardam aprovação e política do ambiente.
         </div>
         <div class="custom-skill-editor-actions">
           <button type="button" class="ghost-button" data-close-skill-detail>Cancelar</button>
@@ -215,7 +215,7 @@
           ${!commands.length && !scripts.length ? '<span class="custom-empty-definition">Nenhuma ação.</span>' : ""}
         </div>
       </div>
-      ${scripts.length ? '<div class="skill-warning"><strong>Scripts protegidos:</strong> ficam cadastrados na Skill, mas exigem aprovação operacional antes de qualquer execução.</div>' : ""}`;
+      ${skill.mode !== "read_only" || scripts.length ? '<div class="skill-warning"><strong>Execução controlada:</strong> ações cadastradas fora do conjunto somente leitura ficam pendentes de aprovação ou da política do ambiente; não são executadas automaticamente.</div>' : ""}`;
     panel.scrollIntoView({ behavior: "smooth", block: "start" });
     setTimeout(() => panel.querySelector('input[name="target"]')?.focus(), 80);
   }
@@ -232,6 +232,7 @@
     if (!element) return;
     const ok = result.status === "healthy";
     const scripts = result.scripts || [];
+    const pendingCommands = result.pending_commands || [];
     element.hidden = false;
     element.innerHTML = `
       <div class="skill-result-header">
@@ -247,11 +248,12 @@
             ${row.stderr ? `<pre class="stderr">${safe(row.stderr)}</pre>` : ""}
           </article>`).join("")}
       </div>
-      ${scripts.length ? `
+      ${pendingCommands.length || scripts.length ? `
         <div class="custom-pending-scripts">
-          <strong>Scripts aguardando aprovação</strong>
-          ${scripts.map((row) => `<div class="custom-pending-script"><code>${safe(row.path)}</code><span>Aprovação necessária</span></div>`).join("")}
-          <p>Nenhum script foi executado nesta etapa.</p>
+          <strong>Ações protegidas</strong>
+          ${pendingCommands.map((row) => `<div class="custom-pending-script"><code>${safe(row.command)}</code><span>${row.status === "blocked_by_policy" ? "Bloqueado pela política" : "Aprovação necessária"}</span>${row.reason ? `<small>${safe(row.reason)}</small>` : ""}</div>`).join("")}
+          ${scripts.map((row) => `<div class="custom-pending-script"><code>${safe(row.path)}</code><span>Aprovação necessária</span>${row.reason ? `<small>${safe(row.reason)}</small>` : ""}</div>`).join("")}
+          <p>Comandos não seguros e scripts não foram executados automaticamente.</p>
         </div>` : ""}`;
   }
 
