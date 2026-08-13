@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.db.agent_models import ScheduledAgentORM
+from app.db.agent_models import AgentRunHistoryORM, ScheduledAgentORM
 from app.db.base import SessionLocal, ensure_database_schema
 from app.services.custom_skill_registry import get_custom_skill
 
@@ -58,6 +58,81 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
+def _parse_datetime(value: datetime | str | None) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if value:
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    return now_utc()
+
+
+def serialize_history(row: AgentRunHistoryORM) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "job_id": row.job_id,
+        "status": row.status,
+        "summary": row.summary,
+        "error": row.error,
+        "correction_status": row.correction_status,
+        "correction_message": row.correction_message,
+        "completed_at": _iso(row.completed_at),
+    }
+
+
+def list_agent_history(agent_id: str, *, limit: int = 5) -> list[dict[str, Any]]:
+    ensure_database_schema()
+    try:
+        identifier = uuid.UUID(str(agent_id))
+    except ValueError:
+        return []
+    safe_limit = max(1, min(20, int(limit)))
+    with SessionLocal() as session:
+        rows = session.scalars(
+            select(AgentRunHistoryORM)
+            .where(AgentRunHistoryORM.agent_id == identifier)
+            .order_by(AgentRunHistoryORM.completed_at.desc())
+            .limit(safe_limit)
+        ).all()
+        return [serialize_history(row) for row in rows]
+
+
+def record_agent_history(
+    agent_id: str,
+    *,
+    job_id: str,
+    status: str,
+    summary: str = "",
+    error: str = "",
+    correction_status: str = "not_needed",
+    correction_message: str = "",
+    completed_at: datetime | str | None = None,
+) -> None:
+    ensure_database_schema()
+    try:
+        identifier = uuid.UUID(str(agent_id))
+    except ValueError:
+        return
+    row = AgentRunHistoryORM(
+        agent_id=identifier,
+        job_id=str(job_id)[:64],
+        status=str(status or "completed")[:40],
+        summary=str(summary or "")[:4000] or None,
+        error=str(error or "")[:4000] or None,
+        correction_status=str(correction_status or "not_needed")[:40],
+        correction_message=str(correction_message or "")[:4000] or None,
+        completed_at=_parse_datetime(completed_at),
+    )
+    with SessionLocal() as session:
+        session.add(row)
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+
+
 def serialize_agent(row: ScheduledAgentORM) -> dict[str, Any]:
     skill = get_custom_skill(row.skill_id)
     return {
@@ -80,6 +155,7 @@ def serialize_agent(row: ScheduledAgentORM) -> dict[str, Any]:
         "created_at": _iso(row.created_at),
         "updated_at": _iso(row.updated_at),
         "automatic_correction": False,
+        "history": list_agent_history(str(row.id), limit=5),
     }
 
 
@@ -194,6 +270,7 @@ def delete_agent(agent_id: str) -> bool:
         row = session.get(ScheduledAgentORM, identifier)
         if row is None:
             return False
+        session.query(AgentRunHistoryORM).filter(AgentRunHistoryORM.agent_id == identifier).delete()
         session.delete(row)
         session.commit()
         return True

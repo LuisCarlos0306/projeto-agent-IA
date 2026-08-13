@@ -58,8 +58,11 @@ def _inject_adaptive_assets(content: str) -> str:
 
 
 def _inject_agent_assets(content: str) -> str:
+    stylesheet = f'<link rel="stylesheet" href="/ui/assets/agents.css?v={_ASSET_VERSION}">'
     agents = f'<script src="/ui/assets/agents.js?v={_ASSET_VERSION}" defer></script>'
     runtime = f'<script src="/ui/assets/runtime-health.js?v={_ASSET_VERSION}" defer></script>'
+    if "agents.css" not in content:
+        content = content.replace("</head>", f"  {stylesheet}\n</head>")
     if "agents.js" not in content:
         content = content.replace("</body>", f"  {agents}\n</body>")
     if "runtime-health.js" not in content:

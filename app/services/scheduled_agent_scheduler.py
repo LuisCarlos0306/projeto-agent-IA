@@ -110,9 +110,12 @@ def run_due_agents(*, settings: Settings | None = None) -> int:
 
 
 def _scheduler_loop(settings: Settings) -> None:
+    from app.services.scheduled_agent_status import reconcile_agent_statuses
+
     poll_seconds = max(5, min(300, int(os.getenv("AGENT_SCHEDULER_POLL_SECONDS", "15") or 15)))
     while True:
         try:
+            reconcile_agent_statuses(settings=settings)
             run_due_agents(settings=settings)
         except Exception:
             pass
