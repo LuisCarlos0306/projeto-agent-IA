@@ -18,13 +18,14 @@ def test_agents_ui_exposes_visual_controls_history_and_skill_binding() -> None:
     assert "Skill vinculada" in script
     assert "Servidor" in script
     assert "Frequência" in script
-    assert "Últimas 5 validações" in script
+    assert "Últimas 5 validações concluídas" in script
     assert "RESULTADO DA CORREÇÃO" in script
     assert ">▶<" in script
     assert ">■<" in script
     assert "Ativo" in script
     assert "Parado" in script
     assert "agent-live-indicator" in style
+    assert "agent-live-spinner" in style
     assert "agent-mini-history" in style
     assert "/ui/api/agents" in script
     assert '"agents.js"' in web
@@ -36,12 +37,39 @@ def test_agents_ui_exposes_visual_controls_history_and_skill_binding() -> None:
     assert "agents_router" in main
 
 
+def test_play_activates_agent_runs_immediately_and_ui_auto_refreshes() -> None:
+    script = (ROOT / "app" / "ui" / "agents.js").read_text(encoding="utf-8")
+    web = (ROOT / "app" / "web_agents.py").read_text(encoding="utf-8")
+
+    assert '/ui/api/agents/${encodeURIComponent(agentId)}/start' in script
+    assert "Play ativa + executa agora" in script
+    assert "BUSY_STATES" in script
+    assert "startAutoRefresh" in script
+    assert "refreshAgents().catch" in script
+    assert '@router.post("/{agent_id}/start")' in web
+    assert "set_agent_enabled(agent_id, True)" in web
+    assert 'source="manual"' in web
+    assert "advance_schedule=False" in web
+    assert '"scheduled": True' in web
+
+
+def test_stop_pauses_only_future_cycles() -> None:
+    script = (ROOT / "app" / "ui" / "agents.js").read_text(encoding="utf-8")
+    web = (ROOT / "app" / "web_agents.py").read_text(encoding="utf-8")
+
+    assert "data-stop-agent" in script
+    assert '/ui/api/agents/${encodeURIComponent(agentId)}/stop' in script
+    assert '@router.post("/{agent_id}/stop")' in web
+    assert "set_agent_enabled(agent_id, False)" in web
+    assert '"running_execution_continues"' in web
+
+
 def test_agents_keep_non_read_only_actions_out_of_automatic_execution() -> None:
     script = (ROOT / "app" / "ui" / "agents.js").read_text(encoding="utf-8")
     registry = (ROOT / "app" / "services" / "scheduled_agent_registry.py").read_text(encoding="utf-8")
     runner = (ROOT / "app" / "services" / "custom_skill_runner.py").read_text(encoding="utf-8")
 
-    assert "Ações corretivas só podem aparecer como sucesso depois da execução autorizada e da pós-validação" in script
+    assert "Ações corretivas só aparecem como sucesso depois da execução autorizada e da pós-validação" in script
     assert '"automatic_correction": False' in registry
     assert '"status": "pending_approval"' in runner
     assert '"status": "blocked_by_policy"' in runner
@@ -113,7 +141,7 @@ def test_agent_configuration_and_history_are_persistent_in_postgresql() -> None:
     assert "agent_models" in base
 
 
-def test_scheduler_uses_redis_lock_and_reconciles_history() -> None:
+def test_scheduler_uses_redis_lock_reconciles_history_and_skips_overlap() -> None:
     scheduler = (ROOT / "app" / "services" / "scheduled_agent_scheduler.py").read_text(encoding="utf-8")
 
     assert "scheduled-agent:{agent_id}:lock" in scheduler
@@ -121,3 +149,6 @@ def test_scheduler_uses_redis_lock_and_reconciles_history() -> None:
     assert "enqueue_custom_skill" in scheduler
     assert '"automatic": source == "schedule"' in scheduler
     assert "reconcile_agent_statuses(settings=settings)" in scheduler
+    assert "_BUSY_STATES" in scheduler
+    assert "_defer_busy_agent" in scheduler
+    assert "if last_status in _BUSY_STATES" in scheduler

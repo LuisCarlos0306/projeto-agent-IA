@@ -17,6 +17,7 @@ from app.services.scheduled_agent_registry import now_utc, next_run, update_agen
 
 _scheduler_guard = threading.Lock()
 _scheduler_started = False
+_BUSY_STATES = {"queued", "running", "cancelling"}
 
 
 def enqueue_agent_job(
@@ -60,6 +61,16 @@ def enqueue_agent_job(
     return queued
 
 
+def _defer_busy_agent(agent_id: str, interval_minutes: int) -> None:
+    """Evita execuções paralelas e inicia um novo intervalo a partir de agora."""
+    with SessionLocal() as session:
+        row = session.get(ScheduledAgentORM, agent_id)
+        if row is None or not row.enabled:
+            return
+        row.next_run_at = next_run(interval_minutes)
+        session.commit()
+
+
 def run_due_agents(*, settings: Settings | None = None) -> int:
     settings = settings or get_settings()
     ensure_database_schema()
@@ -72,7 +83,10 @@ def run_due_agents(*, settings: Settings | None = None) -> int:
                 ScheduledAgentORM.next_run_at <= current,
             )
         ).all()
-        candidates = [(str(row.id), int(row.interval_minutes), row.skill_id) for row in rows]
+        candidates = [
+            (str(row.id), int(row.interval_minutes), row.skill_id, str(row.last_status or ""))
+            for row in rows
+        ]
 
     if not candidates:
         return 0
@@ -81,7 +95,11 @@ def run_due_agents(*, settings: Settings | None = None) -> int:
 
     client = jobs._redis(settings)
     queued_count = 0
-    for agent_id, interval_minutes, skill_id in candidates:
+    for agent_id, interval_minutes, skill_id, last_status in candidates:
+        if last_status in _BUSY_STATES:
+            _defer_busy_agent(agent_id, interval_minutes)
+            continue
+
         lock_key = f"{settings.agent_result_prefix}scheduled-agent:{agent_id}:lock"
         if not client.set(lock_key, "1", nx=True, ex=max(60, min(300, interval_minutes * 60))):
             continue
