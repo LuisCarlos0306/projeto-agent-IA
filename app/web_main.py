@@ -20,6 +20,7 @@ install_multi_host_instrumentation()
 install_confidence_instrumentation()
 
 from app.web import register_ui
+from app.web_agents import router as agents_router
 from app.web_batch import router as batch_router
 from app.web_executions import router as executions_router
 from app.web_fast_validation import register_fast_validation_ui
@@ -61,6 +62,9 @@ if not getattr(app.state, "agent_ui_playbooks_registered", False):
 if not getattr(app.state, "agent_ui_skills_registered", False):
     app.include_router(skills_router)
     app.state.agent_ui_skills_registered = True
+if not getattr(app.state, "agent_ui_agents_registered", False):
+    app.include_router(agents_router)
+    app.state.agent_ui_agents_registered = True
 if not getattr(app.state, "agent_ui_runtime_health_registered", False):
     app.include_router(runtime_health_router)
     app.state.agent_ui_runtime_health_registered = True
