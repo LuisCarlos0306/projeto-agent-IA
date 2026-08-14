@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse
 from app.web import UI_DIR, _require_access
 
 
-ASSET_VERSION = "1.30.32"
+ASSET_VERSION = "1.30.33"
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -128,6 +128,7 @@ def _enhanced_index() -> str:
         "skills.js",
         "conditional-skills.js",
         "agents-v2.js",
+        "agent-correction-approval.js",
         "runtime-health.js",
         "application-map.js",
         "navigation-icons.js",
