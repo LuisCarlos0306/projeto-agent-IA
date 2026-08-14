@@ -97,8 +97,8 @@ def test_menu_keeps_direct_provider_as_separate_option(monkeypatch):
 
     assert selected is not None
     assert selected.source == "direct"
-    assert selected.provider == "gemini"
-    assert selected.model == "gemini-test"
+    assert selected.provider == "groq"
+    assert selected.model == "llama-test"
 
 
 def test_menu_keeps_ollama_as_local_option(monkeypatch):
