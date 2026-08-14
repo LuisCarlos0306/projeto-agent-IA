@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 
 from app.db.agent_run_models import AgentRunDetailORM
 from app.db.base import SessionLocal, engine
@@ -56,12 +55,16 @@ def execution_outcome(job: dict[str, Any], result: dict[str, Any]) -> str:
     commands = [item for item in result.get("commands") or [] if isinstance(item, dict)]
     if any(int(item.get("exit_code") or 0) != 0 for item in commands):
         return "completed_error"
+    if str(result.get("correction_status") or "") == "executed_failed":
+        return "completed_error"
     return "completed_success"
 
 
 def _failure_stage(job: dict[str, Any], result: dict[str, Any]) -> str | None:
     if execution_outcome(job, result) != "completed_error":
         return None
+    if str(result.get("correction_status") or "") == "executed_failed":
+        return "pós-validação da correção"
     phase = dict(job.get("current_phase") or {})
     if phase.get("stage"):
         return str(phase["stage"])[:120]
@@ -72,6 +75,10 @@ def _failure_stage(job: dict[str, Any], result: dict[str, Any]) -> str | None:
 
 
 def _error_code(job: dict[str, Any], result: dict[str, Any]) -> str | None:
+    executed = [item for item in result.get("executed_actions") or [] if isinstance(item, dict)]
+    failed_action = next((item for item in reversed(executed) if str(item.get("status") or "") == "failed"), None)
+    if failed_action is not None and failed_action.get("exit_code") is not None:
+        return f"exit_code={int(failed_action.get('exit_code') or 0)}"
     commands = [item for item in result.get("commands") or [] if isinstance(item, dict)]
     failed = next((item for item in commands if int(item.get("exit_code") or 0) != 0), None)
     if failed is not None:
@@ -84,6 +91,8 @@ def _error_code(job: dict[str, Any], result: dict[str, Any]) -> str | None:
 def _recommendation(job: dict[str, Any], result: dict[str, Any]) -> str | None:
     if execution_outcome(job, result) != "completed_error":
         return None
+    if str(result.get("correction_status") or "") == "executed_failed":
+        return "Revisar a saída da ação corretiva e a pós-validação antes de aprovar nova tentativa."
     phase = str((job.get("current_phase") or {}).get("stage") or "").casefold()
     error = str(job.get("error") or "").casefold()
     if "ssh" in phase or "connect" in phase or "connection" in error:
@@ -130,6 +139,7 @@ def _actions(result: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def record_run_detail(agent_id: str, job: dict[str, Any], result: dict[str, Any]) -> None:
+    """Cria ou atualiza o detalhe da execução, inclusive após correção aprovada."""
     _ensure_schema()
     try:
         identifier = uuid.UUID(str(agent_id))
@@ -153,27 +163,25 @@ def record_run_detail(agent_id: str, job: dict[str, Any], result: dict[str, Any]
         "summary": result.get("summary"),
         "approval_required": bool(result.get("approval_required")),
         "policy_blocked": bool(result.get("policy_blocked")),
+        "correction_status": result.get("correction_status"),
+        "correction_message": result.get("correction_message"),
         "error": job.get("error"),
     }
-    row = AgentRunDetailORM(
-        agent_id=identifier,
-        job_id=job_id,
-        started_at=started,
-        completed_at=completed,
-        duration_ms=duration_ms,
-        final_state=outcome,
-        failure_stage=_failure_stage(job, result),
-        error_code=_error_code(job, result),
-        actions_json=_safe_json(_actions(result)),
-        result_json=_safe_json(result_summary),
-        recommendation=_recommendation(job, result),
-    )
     with SessionLocal() as session:
-        session.add(row)
-        try:
-            session.commit()
-        except IntegrityError:
-            session.rollback()
+        row = session.scalar(select(AgentRunDetailORM).where(AgentRunDetailORM.job_id == job_id))
+        if row is None:
+            row = AgentRunDetailORM(agent_id=identifier, job_id=job_id)
+            session.add(row)
+        row.started_at = started
+        row.completed_at = completed
+        row.duration_ms = duration_ms
+        row.final_state = outcome
+        row.failure_stage = _failure_stage(job, result)
+        row.error_code = _error_code(job, result)
+        row.actions_json = _safe_json(_actions(result))
+        row.result_json = _safe_json(result_summary)
+        row.recommendation = _recommendation(job, result)
+        session.commit()
 
 
 def run_detail_map(job_ids: list[str]) -> dict[str, dict[str, Any]]:
