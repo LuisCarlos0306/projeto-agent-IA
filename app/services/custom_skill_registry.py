@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from app.services.command_catalog import validate_command
+from app.services.custom_skill_condition import CONDITION_OPERATORS
 
 
 DEFAULT_REGISTRY_PATH = Path("/opt/agent-ia/data/custom-skills.json")
@@ -56,27 +57,27 @@ def allowed_script_roots() -> tuple[str, ...]:
 def _read(path: Path | None = None) -> dict[str, Any]:
     target = path or registry_path()
     if not target.exists():
-        return {"schema_version": 2, "skills": []}
+        return {"schema_version": 3, "skills": []}
     try:
         payload = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"não foi possível carregar as skills personalizadas: {exc}") from exc
     if not isinstance(payload.get("skills"), list):
         raise RuntimeError("registro de skills personalizadas inválido")
-    # Migração compatível da v1 para v2.
     for skill in payload["skills"]:
         if not isinstance(skill, dict):
             continue
         skill.setdefault("mode", "read_only")
         skill.setdefault("scripts", [])
-    payload["schema_version"] = 2
+        skill.setdefault("condition", None)
+    payload["schema_version"] = 3
     return payload
 
 
 def _write(payload: dict[str, Any], path: Path | None = None) -> None:
     target = path or registry_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    payload = {**payload, "schema_version": 2}
+    payload = {**payload, "schema_version": 3}
     fd, tmp_name = tempfile.mkstemp(prefix="custom-skills-", suffix=".json", dir=str(target.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -139,12 +140,6 @@ def _validate_read_only_args(parts: list[str]) -> None:
 
 
 def validate_custom_command(command: str, mode: str = "read_only") -> str:
-    """Valida uma ação cadastrada de acordo com a permissão da Skill.
-
-    Diagnóstico e Correção podem registrar comandos livres em uma única linha. Isso
-    não significa autorização de execução: o runner separa comandos comprovadamente
-    somente leitura das ações que devem permanecer aguardando aprovação/política.
-    """
     raw = _clean_configured_command(command)
     clean_mode = _clean_mode(mode)
     if clean_mode != "read_only":
@@ -187,13 +182,65 @@ def validate_script_path(script: str) -> str:
     return normalized
 
 
-def _normalized_payload(name: str, commands: list[str], scripts: list[str], description: str, mode: str) -> dict[str, Any]:
+def _clean_message(value: Any, default: str) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    return (text or default)[:300]
+
+
+def normalize_condition(condition: dict[str, Any] | None, mode: str) -> dict[str, Any] | None:
+    if not condition or not bool(condition.get("enabled")):
+        return None
+    clean_mode = _clean_mode(mode)
+    if clean_mode == "read_only":
+        raise ValueError("fluxo condicional com ação corretiva exige Skill de Diagnóstico ou Correção")
+
+    validation = validate_custom_command(str(condition.get("validation") or ""), "read_only")
+    post_validation = validate_custom_command(str(condition.get("post_validation") or ""), "read_only")
+    operator = str(condition.get("operator") or "exit_code_nonzero").strip().casefold()
+    if operator not in CONDITION_OPERATORS:
+        raise ValueError("condição deve usar um operador suportado")
+    expected = str(condition.get("expected") or "").strip()[:300]
+    if operator in {"stdout_contains", "stdout_not_contains"} and not expected:
+        raise ValueError("informe o texto esperado para a condição de saída")
+
+    raw_action = dict(condition.get("action") or {})
+    action_type = str(raw_action.get("type") or "command").strip().casefold()
+    if action_type not in {"command", "script"}:
+        raise ValueError("ação condicional deve ser comando ou script")
+    raw_value = str(raw_action.get("value") or "").strip()
+    action_value = validate_script_path(raw_value) if action_type == "script" else validate_custom_command(raw_value, clean_mode)
+
+    messages = dict(condition.get("messages") or {})
+    return {
+        "enabled": True,
+        "validation": validation,
+        "operator": operator,
+        "expected": expected,
+        "action": {"type": action_type, "value": action_value},
+        "post_validation": post_validation,
+        "messages": {
+            "no_action": _clean_message(messages.get("no_action"), "Validação concluída. Nenhuma ação necessária."),
+            "success": _clean_message(messages.get("success"), "Correção executada com sucesso e confirmada pela pós-validação."),
+            "failure": _clean_message(messages.get("failure"), "A correção foi executada, mas a pós-validação não confirmou o resultado esperado."),
+        },
+    }
+
+
+def _normalized_payload(
+    name: str,
+    commands: list[str],
+    scripts: list[str],
+    description: str,
+    mode: str,
+    condition: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     clean_name = _clean_name(name)
     clean_mode = _clean_mode(mode)
     clean_commands = [validate_custom_command(item, clean_mode) for item in commands if str(item or "").strip()]
     clean_scripts = [validate_script_path(item) for item in scripts if str(item or "").strip()]
-    if not clean_commands and not clean_scripts:
-        raise ValueError("informe pelo menos um comando ou script")
+    clean_condition = normalize_condition(condition, clean_mode)
+    if not clean_commands and not clean_scripts and not clean_condition:
+        raise ValueError("informe pelo menos uma ação ou configure um fluxo condicional")
     if len(clean_commands) > 20:
         raise ValueError("cada skill pode ter no máximo 20 comandos")
     if len(clean_scripts) > 10:
@@ -206,6 +253,7 @@ def _normalized_payload(name: str, commands: list[str], scripts: list[str], desc
         "commands": list(dict.fromkeys(clean_commands)),
         "scripts": list(dict.fromkeys(clean_scripts)),
         "mode": clean_mode,
+        "condition": clean_condition,
     }
 
 
@@ -225,9 +273,10 @@ def create_custom_skill(
     scripts: list[str] | None = None,
     description: str = "",
     mode: str = "read_only",
+    condition: dict[str, Any] | None = None,
     path: Path | None = None,
 ) -> dict[str, Any]:
-    data = _normalized_payload(name, commands, scripts or [], description, mode)
+    data = _normalized_payload(name, commands, scripts or [], description, mode, condition)
     payload = _read(path)
     if any(str(item.get("name") or "").casefold() == data["name"].casefold() for item in payload["skills"]):
         raise ValueError("já existe uma skill personalizada com esse nome")
@@ -246,9 +295,10 @@ def update_custom_skill(
     scripts: list[str] | None = None,
     description: str = "",
     mode: str = "read_only",
+    condition: dict[str, Any] | None = None,
     path: Path | None = None,
 ) -> dict[str, Any]:
-    data = _normalized_payload(name, commands, scripts or [], description, mode)
+    data = _normalized_payload(name, commands, scripts or [], description, mode, condition)
     payload = _read(path)
     skill = next((item for item in payload["skills"] if item.get("id") == skill_id), None)
     if skill is None:
