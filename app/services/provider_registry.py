@@ -23,6 +23,7 @@ _BUILTIN_CATALOG_IDS = {
     "mistral", "sambanova", "cloudflare", "cohere", "huggingface",
     "cerebras", "vllm", "llamacpp",
 }
+_LEGACY_OPERATIONAL_IDS = {"gemini", "groq", "openrouter", "ollama", "omniroute"}
 _LOCAL_NO_AUTH_SENTINEL = "agent-local-no-auth"
 
 
@@ -319,7 +320,7 @@ def provider_secret(spec: ProviderSpec, settings: Settings | None = None) -> str
 
 def provider_configured(spec: ProviderSpec, settings: Settings | None = None) -> bool:
     if spec.source == "local":
-        return True
+        return bool(spec.default_model) if spec.id in {"vllm", "llamacpp"} else True
     try:
         return bool(provider_secret(spec, settings))
     except Exception:
@@ -327,11 +328,17 @@ def provider_configured(spec: ProviderSpec, settings: Settings | None = None) ->
 
 
 def provider_ids(settings: Settings | None = None) -> tuple[str, ...]:
-    """Retorna todos os provedores nativos e os personalizados configurados."""
+    """Catálogo operacional.
+
+    Todos os provedores nativos ficam visíveis em Configurações. Para preservar o
+    autopilot estável, os provedores novos só entram no roteamento/preflight após
+    receberem a configuração necessária. Os cinco provedores históricos mantêm a
+    visibilidade operacional anterior.
+    """
     settings = settings or get_settings()
     rows: list[str] = []
     for spec in provider_specs(settings):
-        if spec.id in _BUILTIN_CATALOG_IDS or provider_configured(spec, settings):
+        if spec.id in _LEGACY_OPERATIONAL_IDS or provider_configured(spec, settings):
             rows.append(spec.id)
     return tuple(rows)
 
