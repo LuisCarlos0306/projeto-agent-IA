@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.policies import EnvironmentType, classify_command, evaluate_action
+from app.core.policies import EnvironmentType, classify_command, environment_allows_correction, evaluate_action
 from app.core.settings import Settings, get_settings
 from app.services.custom_skill_condition import build_condition_result
 from app.services.custom_skill_registry import get_custom_skill, validate_custom_command, validate_script_path
@@ -53,13 +53,29 @@ def _pending_command(command: str, environment: EnvironmentType, *, conditional:
     }
 
 
-def _pending_script(path: str, *, conditional: bool = False) -> dict[str, Any]:
+def _pending_script(path: str, environment: EnvironmentType, *, conditional: bool = False) -> dict[str, Any]:
     prefix = "A condição da Skill identificou necessidade de atuação. " if conditional else ""
+    if not environment_allows_correction(environment):
+        reason = (
+            "O ambiente precisa ser classificado antes de executar scripts corretivos."
+            if environment == EnvironmentType.UNKNOWN
+            else "Produção e standby permitem investigação e proposta, mas não execução corretiva pelo Agente."
+        )
+        return {
+            "path": path,
+            "risk": "policy_blocked",
+            "enabled": False,
+            "status": "blocked_by_policy",
+            "policy_code": "PROTECTED_SCRIPT_EXECUTION_DENIED",
+            "reason": prefix + reason,
+            "conditional": conditional,
+        }
     return {
         "path": path,
         "risk": "approval_required",
         "enabled": False,
         "status": "pending_approval",
+        "policy_code": "SAFE_SCRIPT_APPROVAL_REQUIRED",
         "reason": prefix + "O script está protegido por aprovação operacional.",
         "conditional": conditional,
     }
@@ -117,7 +133,7 @@ def run_custom_skill(
             safe_commands.append(safe)
         else:
             pending_commands.append(_pending_command(command, target.environment))
-    pending_scripts.extend(_pending_script(script) for script in scripts)
+    pending_scripts.extend(_pending_script(script, target.environment) for script in scripts)
 
     report_progress(
         "custom_skill_started",
@@ -148,11 +164,17 @@ def run_custom_skill(
                 action_type = str(action.get("type") or "command")
                 action_value = str(action.get("value") or "")
                 if action_type == "script":
-                    pending_scripts.append(_pending_script(validate_script_path(action_value), conditional=True))
+                    pending = _pending_script(validate_script_path(action_value), target.environment, conditional=True)
+                    pending_scripts.append(pending)
                 else:
-                    pending_commands.append(_pending_command(validate_custom_command(action_value, mode), target.environment, conditional=True))
-                correction_status = "pending_approval"
-                correction_message = "A validação identificou necessidade de correção; a ação está protegida por aprovação operacional."
+                    pending = _pending_command(validate_custom_command(action_value, mode), target.environment, conditional=True)
+                    pending_commands.append(pending)
+                if pending.get("status") == "pending_approval":
+                    correction_status = "pending_approval"
+                    correction_message = "A validação identificou necessidade de correção; a ação está protegida por aprovação operacional."
+                else:
+                    correction_status = "blocked"
+                    correction_message = str(pending.get("reason") or "A correção foi identificada, mas está bloqueada pela política do ambiente.")
                 report_progress(
                     "custom_skill_condition_matched",
                     detail="Condição atendida: ação corretiva necessária.",
@@ -188,6 +210,8 @@ def run_custom_skill(
         approval_pending = [item for item in pending_commands if item.get("status") == "pending_approval"]
         approval_scripts = [item for item in pending_scripts if item.get("status") == "pending_approval"]
         blocked_commands = [item for item in pending_commands if item.get("status") == "blocked_by_policy"]
+        blocked_scripts = [item for item in pending_scripts if item.get("status") == "blocked_by_policy"]
+        blocked_all = [*blocked_commands, *blocked_scripts]
         pending_total = len(approval_pending) + len(approval_scripts)
         action_needed = bool(condition_result and condition_result.get("action_needed"))
 
@@ -196,19 +220,18 @@ def run_custom_skill(
             summary = f"Skill {skill['name']} concluída com {failed} comando(s) de leitura retornando erro."
         elif action_needed:
             status = "attention"
-            if blocked_commands and not pending_total:
+            if blocked_all and not pending_total:
                 correction_status = "blocked"
-                correction_message = "A correção foi identificada, mas está bloqueada pela política do ambiente."
                 summary = f"Validação da Skill {skill['name']} identificou necessidade de correção, bloqueada pela política do ambiente."
             else:
                 summary = f"Validação da Skill {skill['name']} identificou necessidade de ação corretiva."
-        elif pending_total or blocked_commands:
+        elif pending_total or blocked_all:
             status = "attention"
             details: list[str] = []
             if pending_total:
                 details.append(f"{pending_total} ação(ões) adicionais aguardam aprovação")
-            if blocked_commands:
-                details.append(f"{len(blocked_commands)} comando(s) adicionais estão bloqueados pela política")
+            if blocked_all:
+                details.append(f"{len(blocked_all)} ação(ões) adicionais estão bloqueadas pela política")
             summary = f"Diagnóstico da Skill {skill['name']} concluído. " + "; ".join(details) + "."
         elif condition_result:
             status = "healthy"
@@ -246,7 +269,7 @@ def run_custom_skill(
             "pending_commands": pending_commands,
             "scripts": pending_scripts,
             "approval_required": bool(approval_pending or approval_scripts),
-            "policy_blocked": bool(blocked_commands),
+            "policy_blocked": bool(blocked_all),
             "executed_actions": [],
         }
     finally:

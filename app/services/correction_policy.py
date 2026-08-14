@@ -4,6 +4,9 @@ import re
 from dataclasses import dataclass
 
 
+STANDARD_MOUNT_SCRIPT = "/db/backup/scripts/mount.sh"
+
+
 @dataclass(frozen=True)
 class CorrectionDecision:
     allowed: bool
@@ -67,14 +70,17 @@ def _allowed_system_unit(unit: str) -> bool:
 
 
 def validate_correction(command: str) -> CorrectionDecision:
-    """Autoriza somente recuperação controlada de componentes de monitoramento.
+    """Autoriza somente correções estruturadas e explicitamente conhecidas.
 
-    A IA nunca pode parar, remover, apagar, editar, instalar, reiniciar host,
-    manipular banco de dados ou controlar o ciclo de vida de containers.
+    O script padrão de montagem é aceito apenas como ação exata e continua
+    dependendo de ambiente permitido, aprovação assinada e pós-validação.
     """
     stripped = command.strip()
     if not stripped:
         return CorrectionDecision(False, "comando vazio")
+
+    if stripped == STANDARD_MOUNT_SCRIPT:
+        return CorrectionDecision(True, "script padrão de montagem autorizado com aprovação e pós-validação", "backup_mount_standard")
 
     forbidden = _contains_forbidden(stripped)
     if forbidden:

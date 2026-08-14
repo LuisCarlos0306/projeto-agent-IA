@@ -68,15 +68,18 @@ class GeminiProvider:
 @dataclass
 class OpenAICompatibleProvider:
     name: str
-    api_key: str
+    api_key: str | None
     model: str
     base_url: str
     headers: dict[str, str] | None = None
 
     def generate_json(self, prompt: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        request_headers = dict(self.headers or {})
+        if self.api_key:
+            request_headers["Authorization"] = f"Bearer {self.api_key}"
         response = httpx.post(
             f"{self.base_url.rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}", **(self.headers or {})},
+            headers=request_headers,
             json={
                 "model": self.model,
                 "messages": [{"role": "user", "content": prompt}],
@@ -117,11 +120,19 @@ class GatewayRoute:
 
 PROVIDER_LABELS = {
     "gemini": "Google Gemini",
-    "groq": "Groq (Llama)",
+    "groq": "GroqCloud",
     "deepseek": "DeepSeek",
-    "openrouter": "OpenRouter",
+    "openrouter": "OpenRouter Free",
     "ollama": "Ollama local",
     "omniroute": "OmniRoute",
+    "mistral": "Mistral API",
+    "sambanova": "SambaNova Cloud",
+    "cloudflare": "Cloudflare Workers AI",
+    "cohere": "Cohere",
+    "huggingface": "Hugging Face",
+    "vllm": "vLLM local",
+    "llamacpp": "llama.cpp local",
+    "cerebras": "Cerebras",
 }
 
 _PROVIDER_OVERRIDE: ContextVar[str | None] = ContextVar("agent_ai_provider_override", default=None)
@@ -186,10 +197,9 @@ def direct_provider_status(settings: Settings | None = None) -> list[dict[str, A
         return _legacy_direct_status(settings)
 
     active_ids = set(provider_ids(settings))
-    display_rank = {"gemini": 0, "groq": 1, "deepseek": 2, "openrouter": 3}
     specs = sorted(
         provider_specs(settings),
-        key=lambda spec: (display_rank.get(spec.id, 100), spec.priority, spec.label.casefold()),
+        key=lambda spec: (spec.priority, spec.label.casefold()),
     )
     rows: list[dict[str, Any]] = []
     for spec in specs:
@@ -357,10 +367,10 @@ def get_provider(
         return GeminiProvider(api_key, selected_model or spec.default_model)
     if spec.kind == "ollama":
         return OllamaProvider(selected_model or spec.default_model, spec.base_url)
-    if spec.kind in {"openai-compatible", "gateway"}:
-        api_key = provider_secret(spec, settings)
-        if not api_key:
-            raise ProviderError(f"{spec.credential_env or selected.upper() + '_API_KEY'} não configurada.")
+    if spec.kind in {"openai-compatible", "gateway", "openai-local"}:
+        api_key = provider_secret(spec, settings) if spec.credential_env else None
+        if spec.credential_env and not api_key:
+            raise ProviderError(f"{spec.credential_env} não configurada.")
         model = selected_model or spec.default_model
         if not model:
             if spec.id == "omniroute":

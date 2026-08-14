@@ -47,7 +47,7 @@ def _target():
         reference="172.27.232.212",
         host="172.27.232.212",
         port=22,
-        environment=EnvironmentType.UNKNOWN,
+        environment=EnvironmentType.MONITORING,
         inventory=None,
     )
 

@@ -6,6 +6,11 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.core.settings import get_settings
+from app.services.custom_skill_approved_correction import (
+    CustomSkillCorrectionError,
+    correction_preview,
+    execute_approved_agent_correction,
+)
 from app.services.scheduled_agent_presenter import enrich_agent, enrich_agents
 from app.services.scheduled_agent_registry import (
     create_agent,
@@ -34,6 +39,10 @@ class AgentPayload(BaseModel):
 
 class AgentTogglePayload(BaseModel):
     enabled: bool
+
+
+class AgentCorrectionApprovalPayload(BaseModel):
+    confirmed: bool
 
 
 def _service_error(exc: Exception) -> HTTPException:
@@ -184,6 +193,41 @@ def run_now(agent_id: str, request: Request) -> dict[str, Any]:
     except Exception as exc:
         raise _service_error(exc) from exc
     return queued
+
+
+@router.get("/{agent_id}/correction")
+def correction(agent_id: str, request: Request) -> dict[str, Any]:
+    """Mostra a ação exata que pode ser submetida à aprovação humana."""
+    _require_access(request)
+    try:
+        return correction_preview(agent_id, settings=get_settings())
+    except CustomSkillCorrectionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/{agent_id}/correction/approve")
+def approve_correction(
+    agent_id: str,
+    payload: AgentCorrectionApprovalPayload,
+    request: Request,
+) -> dict[str, Any]:
+    """Executa somente após confirmação humana explícita da ação exata."""
+    _require_mutation(request)
+    if payload.confirmed is not True:
+        raise HTTPException(status_code=422, detail="confirmação explícita da correção é obrigatória")
+    try:
+        result = execute_approved_agent_correction(
+            agent_id,
+            requested_by=_operator_name(),
+            settings=get_settings(),
+        )
+        return {**result, "agent": _current_agent(agent_id)}
+    except CustomSkillCorrectionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _service_error(exc) from exc
 
 
 @router.delete("/{agent_id}")

@@ -74,6 +74,7 @@ def _inject_agent_assets(content: str) -> str:
     )
     scripts = (
         "agents-v2.js",
+        "agent-correction-approval.js",
         "runtime-health.js",
         "application-map.js",
         "conditional-skills.js",
