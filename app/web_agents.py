@@ -62,13 +62,25 @@ def _current_agent(agent_id: str) -> dict[str, Any]:
     return enrich_agent(item, settings=settings)
 
 
+def _compact_agent_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compact: list[dict[str, Any]] = []
+    for item in rows:
+        payload = dict(item)
+        payload["history"] = []
+        compact.append(payload)
+    return compact
+
+
 @router.get("")
-def agents(request: Request) -> dict[str, Any]:
+def agents(request: Request, compact: bool = False) -> dict[str, Any]:
     _require_access(request)
     try:
         settings = get_settings()
         reconcile_agent_statuses(settings=settings)
-        return {"agents": enrich_agents(list_agents(), settings=settings)}
+        rows = list_agents()
+        if compact:
+            rows = _compact_agent_rows(rows)
+        return {"agents": enrich_agents(rows, settings=settings)}
     except Exception as exc:
         raise _service_error(exc) from exc
 
