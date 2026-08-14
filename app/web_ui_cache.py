@@ -60,16 +60,22 @@ def _inject_adaptive_assets(content: str) -> str:
 def _inject_agent_assets(content: str) -> str:
     stylesheet = f'<link rel="stylesheet" href="/ui/assets/agents-v2.css?v={_ASSET_VERSION}">'
     icon_style = f'<link rel="stylesheet" href="/ui/assets/agent-flow-icon.css?v={_ASSET_VERSION}">'
+    map_style = f'<link rel="stylesheet" href="/ui/assets/application-map.css?v={_ASSET_VERSION}">'
     agents = f'<script src="/ui/assets/agents-v2.js?v={_ASSET_VERSION}" defer></script>'
     runtime = f'<script src="/ui/assets/runtime-health.js?v={_ASSET_VERSION}" defer></script>'
+    application_map = f'<script src="/ui/assets/application-map.js?v={_ASSET_VERSION}" defer></script>'
     if "agents-v2.css" not in content:
         content = content.replace("</head>", f"  {stylesheet}\n</head>")
     if "agent-flow-icon.css" not in content:
         content = content.replace("</head>", f"  {icon_style}\n</head>")
+    if "application-map.css" not in content:
+        content = content.replace("</head>", f"  {map_style}\n</head>")
     if "agents-v2.js" not in content:
         content = content.replace("</body>", f"  {agents}\n</body>")
     if "runtime-health.js" not in content:
         content = content.replace("</body>", f"  {runtime}\n</body>")
+    if "application-map.js" not in content:
+        content = content.replace("</body>", f"  {application_map}\n</body>")
     return content
 
 
