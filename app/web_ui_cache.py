@@ -16,9 +16,11 @@ _UI_DIR = Path(__file__).resolve().parent / "ui"
 # Templates mantidos como contrato de regressão dos assets centrais da interface.
 _VERSIONED_AGENT_ASSET_TEMPLATES = (
     "agents-v2.css?v={_ASSET_VERSION}",
-    "agents-v2.js?v={_ASSET_VERSION}",
+    "agents-v3.js?v={_ASSET_VERSION}",
     "application-map.css?v={_ASSET_VERSION}",
     "application-map.js?v={_ASSET_VERSION}",
+    "provider-compact-ui.css?v={_ASSET_VERSION}",
+    "provider-compact-ui.js?v={_ASSET_VERSION}",
 )
 
 
@@ -71,14 +73,16 @@ def _inject_agent_assets(content: str) -> str:
         "application-map.css",
         "conditional-skills.css",
         "navigation-icons.css",
+        "provider-compact-ui.css",
     )
     scripts = (
-        "agents-v2.js",
+        "agents-v3.js",
         "agent-correction-approval.js",
         "runtime-health.js",
         "application-map.js",
         "conditional-skills.js",
         "navigation-icons.js",
+        "provider-compact-ui.js",
     )
     for asset in styles:
         if asset not in content:
