@@ -11,11 +11,7 @@ from app.services.custom_skill_registry import get_custom_skill, validate_custom
 from app.services.redaction import redact_text
 from app.services.reviewer import review_corrections
 from app.services.runner import build_executor, resolve_target
-from app.services.scheduled_agent_registry import (
-    get_agent,
-    update_agent_history_result,
-    update_agent_runtime,
-)
+from app.services.scheduled_agent_registry import get_agent, update_agent_history_result, update_agent_runtime
 from app.services.scheduled_agent_run_log import record_run_detail
 from app.services.tool_registry import execute_tool
 
@@ -115,6 +111,16 @@ def _run_read_only(executor: Any, command: str, environment: EnvironmentType, se
     }
 
 
+def _mount_probe(executor: Any, environment: EnvironmentType, mount_point: str, settings: Settings) -> dict[str, Any]:
+    quoted = shlex.quote(mount_point)
+    probe = _run_read_only(executor, f"findmnt -M {quoted} -n -o TARGET", environment, settings)
+    targets = [line.strip() for line in str(probe.get("stdout") or "").splitlines() if line.strip()]
+    probe["expected_target"] = mount_point
+    probe["observed_target"] = targets[0] if targets else None
+    probe["ok"] = int(probe.get("exit_code") or 0) == 0 and bool(targets) and targets[0] == mount_point
+    return probe
+
+
 def _execute_standard_mount(
     executor: Any,
     environment: EnvironmentType,
@@ -125,15 +131,14 @@ def _execute_standard_mount(
     if not decision.allowed:
         raise CustomSkillCorrectionError(decision.reason)
 
-    quoted = shlex.quote(mount_point)
-    before = _run_read_only(executor, f"findmnt -M {quoted}", environment, settings)
+    before = _mount_probe(executor, environment, mount_point, settings)
     result = executor.run_sudo(
         STANDARD_MOUNT_SCRIPT,
         environment,
         approved=True,
         timeout=max(120, int(getattr(settings, "ssh_command_timeout", 60) or 60)),
     )
-    after = _run_read_only(executor, f"findmnt -M {quoted}", environment, settings)
+    after = _mount_probe(executor, environment, mount_point, settings)
     validated = int(result.exit_code) == 0 and bool(after["ok"])
     return {
         "tool": "backup.mount_standard",
@@ -151,13 +156,11 @@ def _execute_standard_mount(
 
 def _remove_executed_pending(result: dict[str, Any], configured_action: str) -> None:
     result["pending_commands"] = [
-        item
-        for item in result.get("pending_commands") or []
+        item for item in result.get("pending_commands") or []
         if str(item.get("command") or "") != configured_action
     ]
     result["scripts"] = [
-        item
-        for item in result.get("scripts") or []
+        item for item in result.get("scripts") or []
         if str(item.get("path") or "") != configured_action
     ]
     result["approval_required"] = any(
@@ -184,9 +187,7 @@ def correction_preview(agent_id: str, *, settings: Settings | None = None) -> di
     if not result.get("action_needed"):
         raise CustomSkillCorrectionError("a última validação não identificou necessidade de correção")
     if str(result.get("correction_status") or "") != "pending_approval":
-        raise CustomSkillCorrectionError(
-            str(result.get("correction_message") or "a correção não está aguardando aprovação")
-        )
+        raise CustomSkillCorrectionError(str(result.get("correction_message") or "a correção não está aguardando aprovação"))
 
     skill = get_custom_skill(str(agent.get("skill_id") or ""))
     if not skill:
@@ -211,19 +212,7 @@ def correction_preview(agent_id: str, *, settings: Settings | None = None) -> di
     }
 
 
-def execute_approved_agent_correction(
-    agent_id: str,
-    *,
-    requested_by: str | None,
-    settings: Settings | None = None,
-) -> dict[str, Any]:
-    settings = settings or get_settings()
-    preview = correction_preview(agent_id, settings=settings)
-    agent = get_agent(agent_id) or {}
-    skill = get_custom_skill(str(preview["skill_id"])) or {}
-    action = dict(preview["action"])
-    condition = dict(skill.get("condition") or {})
-
+def _review(preview: dict[str, Any], condition: dict[str, Any], action: dict[str, Any], settings: Settings) -> tuple[dict[str, Any], dict[str, Any]]:
     proposal = {
         "tool": action["tool"],
         "arguments": dict(action["arguments"]),
@@ -232,22 +221,40 @@ def execute_approved_agent_correction(
     }
     condition_result = dict(preview.get("condition") or {})
     validation = dict(condition_result.get("validation") or {})
-    review = review_corrections(
-        {
-            "status": "attention",
-            "confidence": 100,
-            "probable_cause": "A validação condicional da Skill indicou que a ação corretiva configurada é necessária.",
-            "conclusion": str((condition.get("messages") or {}).get("failure") or "A condição de correção foi atendida."),
-            "root_cause": {"source": "custom_skill_condition", "action_needed": True},
-        },
-        [proposal],
-        [validation] if validation else [],
-        settings=settings,
-    )
+    try:
+        review = review_corrections(
+            {
+                "status": "attention",
+                "confidence": 100,
+                "probable_cause": "A validação condicional da Skill indicou que a ação corretiva configurada é necessária.",
+                "conclusion": str((condition.get("messages") or {}).get("failure") or "A condição de correção foi atendida."),
+                "root_cause": {"source": "custom_skill_condition", "action_needed": True},
+            },
+            [proposal],
+            [validation] if validation else [],
+            settings=settings,
+        )
+    except Exception as exc:
+        raise CustomSkillCorrectionError(f"segunda IA indisponível para revisar a correção: {type(exc).__name__}: {exc}") from exc
     if not review.get("approved"):
         raise CustomSkillCorrectionError(
             "a segunda IA não aprovou a correção: " + str(review.get("reason") or review.get("status") or "revisão recusada")
         )
+    return proposal, review
+
+
+def execute_approved_agent_correction(
+    agent_id: str,
+    *,
+    requested_by: str | None,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    settings = settings or get_settings()
+    preview = correction_preview(agent_id, settings=settings)
+    skill = get_custom_skill(str(preview["skill_id"])) or {}
+    action = dict(preview["action"])
+    condition = dict(skill.get("condition") or {})
+    proposal, review = _review(preview, condition, action, settings)
 
     approval_id = f"agent:{agent_id}:{preview['job_id']}"
     actions = [proposal]
@@ -269,40 +276,45 @@ def execute_approved_agent_correction(
         raise CustomSkillCorrectionError("a classificação do ambiente mudou; gere uma nova aprovação")
 
     executor = build_executor(target, settings=settings)
+    execution: dict[str, Any]
     try:
         executor.connect()
-        if action["tool"] == "backup.mount_standard":
-            execution = _execute_standard_mount(
-                executor,
-                target.environment,
-                str(action["arguments"]["mount_point"]),
-                settings,
-            )
-        else:
-            execution = execute_tool(
-                executor,
-                target.environment,
-                str(action["tool"]),
-                dict(action["arguments"]),
-                approved=True,
-            )
-            configured_post = str(condition.get("post_validation") or "").strip()
-            if configured_post:
-                post = _run_read_only(executor, configured_post, target.environment, settings)
-                execution["post_validation"] = post
-                execution["validated"] = execution.get("status") == "validated" and post["ok"]
-                if not execution["validated"]:
-                    execution["status"] = "failed"
+        try:
+            if action["tool"] == "backup.mount_standard":
+                execution = _execute_standard_mount(
+                    executor, target.environment, str(action["arguments"]["mount_point"]), settings,
+                )
+            else:
+                execution = execute_tool(
+                    executor, target.environment, str(action["tool"]), dict(action["arguments"]), approved=True,
+                )
+                configured_post = str(condition.get("post_validation") or "").strip()
+                if configured_post:
+                    post = _run_read_only(executor, configured_post, target.environment, settings)
+                    execution["post_validation"] = post
+                    execution["validated"] = execution.get("status") == "validated" and post["ok"]
+                    if not execution["validated"]:
+                        execution["status"] = "failed"
+        except Exception as exc:
+            execution = {
+                "tool": action["tool"],
+                "arguments": dict(action["arguments"]),
+                "status": "failed",
+                "exit_code": None,
+                "stdout": "",
+                "stderr": redact_text(f"{type(exc).__name__}: {exc}")[:4000],
+                "validated": False,
+            }
     finally:
         executor.close()
 
     succeeded = str(execution.get("status") or "") == "validated" and bool(execution.get("validated", True))
     messages = dict(condition.get("messages") or {})
     if succeeded:
-        if action["tool"] == "backup.mount_standard":
-            correction_message = str(messages.get("success") or "Montagem executada com sucesso e confirmada pela pós-validação.")
-        else:
-            correction_message = str(messages.get("success") or "Correção executada com sucesso e confirmada pela pós-validação.")
+        correction_message = str(
+            messages.get("success")
+            or ("Montagem executada com sucesso e confirmada pela pós-validação." if action["tool"] == "backup.mount_standard" else "Correção executada com sucesso e confirmada pela pós-validação.")
+        )
         correction_status = "executed_success"
     else:
         correction_message = str(messages.get("failure") or "A correção foi executada, mas a pós-validação não confirmou o resultado esperado.")
@@ -332,18 +344,14 @@ def execute_approved_agent_correction(
     jobs._store(jobs._redis(settings), settings, str(preview["job_id"]), job)
 
     final_state = "completed_success" if succeeded else "completed_error"
-    update_agent_runtime(
-        agent_id,
-        status=final_state,
-        summary=correction_message,
-        error="" if succeeded else str(execution.get("stderr") or "correção não confirmada"),
-    )
+    error = "" if succeeded else str(execution.get("stderr") or "correção não confirmada")
+    update_agent_runtime(agent_id, status=final_state, summary=correction_message, error=error)
     update_agent_history_result(
         agent_id,
         job_id=str(preview["job_id"]),
         status=final_state,
         summary=correction_message,
-        error="" if succeeded else str(execution.get("stderr") or "correção não confirmada"),
+        error=error,
         correction_status=correction_status,
         correction_message=correction_message,
     )
