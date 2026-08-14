@@ -19,21 +19,11 @@ _PROVIDER_ID = re.compile(r"^[a-z][a-z0-9_-]{1,47}$")
 _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{2,95}$")
 _ALLOWED_TIERS = {"free", "trial", "paid", "local", "gateway", "custom"}
 _BUILTIN_CATALOG_IDS = {
-    "gemini",
-    "groq",
-    "deepseek",
-    "openrouter",
-    "ollama",
-    "omniroute",
-    "mistral",
-    "sambanova",
-    "cloudflare",
-    "cohere",
-    "huggingface",
-    "cerebras",
-    "vllm",
-    "llamacpp",
+    "gemini", "groq", "deepseek", "openrouter", "ollama", "omniroute",
+    "mistral", "sambanova", "cloudflare", "cohere", "huggingface",
+    "cerebras", "vllm", "llamacpp",
 }
+_LOCAL_NO_AUTH_SENTINEL = "agent-local-no-auth"
 
 
 @dataclass(frozen=True)
@@ -123,202 +113,120 @@ def _openrouter_headers(settings: Settings) -> dict[str, str]:
     return headers
 
 
-def _cloudflare_base(settings: Settings) -> str:
-    return _configured_value(
-        settings,
-        "CLOUDFLARE_AI_BASE_URL",
-        "https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/v1",
+def _remote_spec(
+    settings: Settings,
+    *,
+    provider_id: str,
+    label: str,
+    base_env: str,
+    base_default: str,
+    model_env: str,
+    model_default: str,
+    models_env: str,
+    credential_env: str,
+    tier: str,
+    priority: int,
+    source: str = "direct",
+) -> ProviderSpec:
+    model = _configured_value(settings, model_env, model_default)
+    return ProviderSpec(
+        id=provider_id,
+        label=label,
+        kind="openai-compatible",
+        source=source,
+        base_url=_configured_value(settings, base_env, base_default),
+        default_model=model,
+        models=_split_models(_configured_value(settings, models_env, model)),
+        credential_env=credential_env,
+        tier=tier,
+        priority=priority,
+        builtin=True,
     )
 
 
 def _builtin_specs(settings: Settings) -> tuple[ProviderSpec, ...]:
     return (
         ProviderSpec(
-            id="groq",
-            label="GroqCloud",
-            kind="openai-compatible",
-            source="direct",
-            base_url=settings.groq_base_url,
-            default_model=settings.groq_model,
-            models=(settings.groq_model,),
-            credential_env="GROQ_API_KEY",
-            tier="free",
-            priority=10,
-            builtin=True,
+            id="groq", label="GroqCloud", kind="openai-compatible", source="direct",
+            base_url=settings.groq_base_url, default_model=settings.groq_model,
+            models=(settings.groq_model,), credential_env="GROQ_API_KEY", tier="free", priority=10, builtin=True,
         ),
         ProviderSpec(
-            id="gemini",
-            label="Google Gemini",
-            kind="gemini",
-            source="direct",
-            base_url="https://generativelanguage.googleapis.com/v1beta",
-            default_model=settings.gemini_model,
-            models=_split_models(settings.gemini_free_models),
-            credential_env="GEMINI_API_KEY",
-            tier="free",
-            priority=20,
-            builtin=True,
+            id="gemini", label="Google Gemini", kind="gemini", source="direct",
+            base_url="https://generativelanguage.googleapis.com/v1beta", default_model=settings.gemini_model,
+            models=_split_models(settings.gemini_free_models), credential_env="GEMINI_API_KEY", tier="free", priority=20, builtin=True,
+        ),
+        _remote_spec(
+            settings, provider_id="mistral", label="Mistral API", base_env="MISTRAL_BASE_URL",
+            base_default="https://api.mistral.ai/v1", model_env="MISTRAL_MODEL", model_default="mistral-small-latest",
+            models_env="MISTRAL_MODELS", credential_env="MISTRAL_API_KEY", tier="free", priority=30,
         ),
         ProviderSpec(
-            id="mistral",
-            label="Mistral API",
-            kind="openai-compatible",
-            source="direct",
-            base_url=_configured_value(settings, "MISTRAL_BASE_URL", "https://api.mistral.ai/v1"),
-            default_model=_configured_value(settings, "MISTRAL_MODEL", "mistral-small-latest"),
-            models=_split_models(_configured_value(settings, "MISTRAL_MODELS", "mistral-small-latest")),
-            credential_env="MISTRAL_API_KEY",
-            tier="free",
-            priority=30,
-            builtin=True,
+            id="openrouter", label="OpenRouter Free", kind="openai-compatible", source="gateway",
+            base_url=settings.openrouter_base_url, default_model=settings.openrouter_model,
+            models=(settings.openrouter_model,), credential_env="OPENROUTER_API_KEY", tier="free", priority=40,
+            headers=_openrouter_headers(settings), builtin=True,
+        ),
+        _remote_spec(
+            settings, provider_id="sambanova", label="SambaNova Cloud", base_env="SAMBANOVA_BASE_URL",
+            base_default="https://api.sambanova.ai/v1", model_env="SAMBANOVA_MODEL", model_default="gpt-oss-120b",
+            models_env="SAMBANOVA_MODELS", credential_env="SAMBANOVA_API_KEY", tier="trial", priority=50,
+        ),
+        _remote_spec(
+            settings, provider_id="cerebras", label="Cerebras", base_env="CEREBRAS_BASE_URL",
+            base_default="https://api.cerebras.ai/v1", model_env="CEREBRAS_MODEL", model_default="gpt-oss-120b",
+            models_env="CEREBRAS_MODELS", credential_env="CEREBRAS_API_KEY", tier="trial", priority=60,
+        ),
+        _remote_spec(
+            settings, provider_id="cloudflare", label="Cloudflare Workers AI", base_env="CLOUDFLARE_AI_BASE_URL",
+            base_default="https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/v1",
+            model_env="CLOUDFLARE_AI_MODEL", model_default="@cf/openai/gpt-oss-20b",
+            models_env="CLOUDFLARE_AI_MODELS", credential_env="CLOUDFLARE_API_TOKEN", tier="free", priority=70,
+        ),
+        _remote_spec(
+            settings, provider_id="cohere", label="Cohere", base_env="COHERE_BASE_URL",
+            base_default="https://api.cohere.ai/compatibility/v1", model_env="COHERE_MODEL", model_default="command-a-03-2025",
+            models_env="COHERE_MODELS", credential_env="COHERE_API_KEY", tier="trial", priority=80,
+        ),
+        _remote_spec(
+            settings, provider_id="huggingface", label="Hugging Face", base_env="HUGGINGFACE_BASE_URL",
+            base_default="https://router.huggingface.co/v1", model_env="HUGGINGFACE_MODEL",
+            model_default="openai/gpt-oss-20b:fastest", models_env="HUGGINGFACE_MODELS", credential_env="HF_TOKEN",
+            tier="free", priority=90,
         ),
         ProviderSpec(
-            id="openrouter",
-            label="OpenRouter Free",
-            kind="openai-compatible",
-            source="gateway",
-            base_url=settings.openrouter_base_url,
-            default_model=settings.openrouter_model,
-            models=(settings.openrouter_model,),
-            credential_env="OPENROUTER_API_KEY",
-            tier="free",
-            priority=40,
-            headers=_openrouter_headers(settings),
-            builtin=True,
+            id="ollama", label="Ollama local", kind="ollama", source="local",
+            base_url=settings.ollama_base_url, default_model=settings.ollama_model,
+            models=_split_models(settings.ollama_preferred_models), credential_env=None, tier="local", priority=100, builtin=True,
         ),
         ProviderSpec(
-            id="sambanova",
-            label="SambaNova Cloud",
-            kind="openai-compatible",
-            source="direct",
-            base_url=_configured_value(settings, "SAMBANOVA_BASE_URL", "https://api.sambanova.ai/v1"),
-            default_model=_configured_value(settings, "SAMBANOVA_MODEL", "gpt-oss-120b"),
-            models=_split_models(_configured_value(settings, "SAMBANOVA_MODELS", "gpt-oss-120b")),
-            credential_env="SAMBANOVA_API_KEY",
-            tier="trial",
-            priority=50,
-            builtin=True,
-        ),
-        ProviderSpec(
-            id="cerebras",
-            label="Cerebras",
-            kind="openai-compatible",
-            source="direct",
-            base_url=_configured_value(settings, "CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1"),
-            default_model=_configured_value(settings, "CEREBRAS_MODEL", "gpt-oss-120b"),
-            models=_split_models(_configured_value(settings, "CEREBRAS_MODELS", "gpt-oss-120b")),
-            credential_env="CEREBRAS_API_KEY",
-            tier="trial",
-            priority=60,
-            builtin=True,
-        ),
-        ProviderSpec(
-            id="cloudflare",
-            label="Cloudflare Workers AI",
-            kind="openai-compatible",
-            source="direct",
-            base_url=_cloudflare_base(settings),
-            default_model=_configured_value(settings, "CLOUDFLARE_AI_MODEL", "@cf/openai/gpt-oss-20b"),
-            models=_split_models(_configured_value(settings, "CLOUDFLARE_AI_MODELS", "@cf/openai/gpt-oss-20b")),
-            credential_env="CLOUDFLARE_API_TOKEN",
-            tier="free",
-            priority=70,
-            builtin=True,
-        ),
-        ProviderSpec(
-            id="cohere",
-            label="Cohere",
-            kind="openai-compatible",
-            source="direct",
-            base_url=_configured_value(settings, "COHERE_BASE_URL", "https://api.cohere.ai/compatibility/v1"),
-            default_model=_configured_value(settings, "COHERE_MODEL", "command-a-03-2025"),
-            models=_split_models(_configured_value(settings, "COHERE_MODELS", "command-a-03-2025")),
-            credential_env="COHERE_API_KEY",
-            tier="trial",
-            priority=80,
-            builtin=True,
-        ),
-        ProviderSpec(
-            id="huggingface",
-            label="Hugging Face",
-            kind="openai-compatible",
-            source="direct",
-            base_url=_configured_value(settings, "HUGGINGFACE_BASE_URL", "https://router.huggingface.co/v1"),
-            default_model=_configured_value(settings, "HUGGINGFACE_MODEL", "openai/gpt-oss-20b:fastest"),
-            models=_split_models(_configured_value(settings, "HUGGINGFACE_MODELS", "openai/gpt-oss-20b:fastest")),
-            credential_env="HF_TOKEN",
-            tier="free",
-            priority=90,
-            builtin=True,
-        ),
-        ProviderSpec(
-            id="ollama",
-            label="Ollama local",
-            kind="ollama",
-            source="local",
-            base_url=settings.ollama_base_url,
-            default_model=settings.ollama_model,
-            models=_split_models(settings.ollama_preferred_models),
-            credential_env=None,
-            tier="local",
-            priority=100,
-            builtin=True,
-        ),
-        ProviderSpec(
-            id="vllm",
-            label="vLLM local",
-            kind="openai-local",
-            source="local",
+            id="vllm", label="vLLM local", kind="openai-compatible", source="local",
             base_url=_configured_value(settings, "VLLM_BASE_URL", "http://127.0.0.1:8000/v1"),
             default_model=_configured_value(settings, "VLLM_MODEL", ""),
             models=_split_models(_configured_value(settings, "VLLM_MODELS", "")),
-            credential_env=None,
-            tier="local",
-            priority=110,
-            builtin=True,
+            credential_env="VLLM_API_KEY", tier="local", priority=110, builtin=True,
         ),
         ProviderSpec(
-            id="llamacpp",
-            label="llama.cpp local",
-            kind="openai-local",
-            source="local",
+            id="llamacpp", label="llama.cpp local", kind="openai-compatible", source="local",
             base_url=_configured_value(settings, "LLAMACPP_BASE_URL", "http://127.0.0.1:8081/v1"),
             default_model=_configured_value(settings, "LLAMACPP_MODEL", ""),
             models=_split_models(_configured_value(settings, "LLAMACPP_MODELS", "")),
-            credential_env=None,
-            tier="local",
-            priority=120,
-            builtin=True,
+            credential_env="LLAMACPP_API_KEY", tier="local", priority=120, builtin=True,
         ),
         ProviderSpec(
-            id="omniroute",
-            label="OmniRoute",
-            kind="gateway",
-            source="gateway",
+            id="omniroute", label="OmniRoute", kind="gateway", source="gateway",
             base_url=settings.omniroute_base_url,
             default_model=(settings.omniroute_default_route or settings.omniroute_model or "").strip(),
             models=tuple(
                 item.strip().split("=", 1)[-1].strip()
-                for item in re.split(r"[,\n]", settings.omniroute_routes or "")
-                if item.strip()
+                for item in re.split(r"[,\n]", settings.omniroute_routes or "") if item.strip()
             ),
-            credential_env="OMNIROUTE_API_KEY",
-            tier="gateway",
-            priority=130,
-            builtin=True,
+            credential_env="OMNIROUTE_API_KEY", tier="gateway", priority=130, builtin=True,
         ),
         ProviderSpec(
-            id="deepseek",
-            label="DeepSeek",
-            kind="openai-compatible",
-            source="direct",
-            base_url=settings.deepseek_base_url,
-            default_model=settings.deepseek_model,
-            models=_split_models(settings.deepseek_models),
-            credential_env="DEEPSEEK_API_KEY",
-            tier="paid",
-            priority=140,
-            builtin=True,
+            id="deepseek", label="DeepSeek", kind="openai-compatible", source="direct",
+            base_url=settings.deepseek_base_url, default_model=settings.deepseek_model,
+            models=_split_models(settings.deepseek_models), credential_env="DEEPSEEK_API_KEY", tier="paid", priority=140, builtin=True,
         ),
     )
 
@@ -362,20 +270,12 @@ def _custom_spec(row: dict[str, Any]) -> ProviderSpec | None:
         enabled=bool(row.get("enabled", True)),
         tier=tier if tier in _ALLOWED_TIERS else "custom",
         priority=max(1, min(int(row.get("priority", 100)), 999)),
-        headers={
-            str(key): str(value)
-            for key, value in dict(row.get("headers") or {}).items()
-            if str(key).strip() and str(value).strip()
-        },
+        headers={str(key): str(value) for key, value in dict(row.get("headers") or {}).items() if str(key).strip() and str(value).strip()},
         builtin=False,
     )
 
 
-def provider_specs(
-    settings: Settings | None = None,
-    *,
-    include_disabled: bool = False,
-) -> tuple[ProviderSpec, ...]:
+def provider_specs(settings: Settings | None = None, *, include_disabled: bool = False) -> tuple[ProviderSpec, ...]:
     settings = settings or get_settings()
     specs = list(_builtin_specs(settings))
     builtin_ids = {item.id for item in specs}
@@ -390,10 +290,7 @@ def provider_specs(
 
 def provider_spec(provider_id: str, settings: Settings | None = None) -> ProviderSpec | None:
     normalized = str(provider_id or "").strip().lower()
-    return next(
-        (item for item in provider_specs(settings, include_disabled=True) if item.id == normalized),
-        None,
-    )
+    return next((item for item in provider_specs(settings, include_disabled=True) if item.id == normalized), None)
 
 
 def provider_label(provider_id: str, settings: Settings | None = None) -> str:
@@ -415,11 +312,13 @@ def provider_secret(spec: ProviderSpec, settings: Settings | None = None) -> str
     attribute = attribute_map.get(spec.credential_env)
     fallback = getattr(settings, attribute, None) if attribute else None
     fallback = fallback or _dotenv_value(spec.credential_env, settings)
+    if spec.source == "local" and not fallback:
+        fallback = _LOCAL_NO_AUTH_SENTINEL
     return get_secret(spec.credential_env, fallback, settings=settings)
 
 
 def provider_configured(spec: ProviderSpec, settings: Settings | None = None) -> bool:
-    if spec.kind in {"ollama", "openai-local"}:
+    if spec.source == "local":
         return True
     try:
         return bool(provider_secret(spec, settings))
@@ -428,7 +327,7 @@ def provider_configured(spec: ProviderSpec, settings: Settings | None = None) ->
 
 
 def provider_ids(settings: Settings | None = None) -> tuple[str, ...]:
-    """Retorna o catálogo operacional, incluindo todos os provedores nativos."""
+    """Retorna todos os provedores nativos e os personalizados configurados."""
     settings = settings or get_settings()
     rows: list[str] = []
     for spec in provider_specs(settings):
@@ -453,11 +352,7 @@ def _atomic_write(path: Path, content: str, mode: int = 0o600) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def update_env_values(
-    updates: dict[str, str],
-    *,
-    settings: Settings | None = None,
-) -> Path:
+def update_env_values(updates: dict[str, str], *, settings: Settings | None = None) -> Path:
     settings = settings or get_settings()
     path = _env_path(settings)
     lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
@@ -467,7 +362,6 @@ def update_env_values(
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         positions[stripped.split("=", 1)[0].strip()] = index
-
     for key, value in updates.items():
         normalized_key = str(key).strip().upper()
         normalized_value = str(value).strip()
@@ -480,7 +374,6 @@ def update_env_values(
             lines[positions[normalized_key]] = row
         else:
             lines.append(row)
-
     _atomic_write(path, "\n".join(lines).rstrip() + "\n")
     get_settings.cache_clear()
     clear_secret_cache()
@@ -489,25 +382,13 @@ def update_env_values(
 
 def _save_custom_rows(rows: list[dict[str, Any]], settings: Settings) -> Path:
     path = _registry_path(settings)
-    _atomic_write(
-        path,
-        json.dumps({"version": 1, "providers": rows}, ensure_ascii=False, indent=2) + "\n",
-    )
+    _atomic_write(path, json.dumps({"version": 1, "providers": rows}, ensure_ascii=False, indent=2) + "\n")
     return path
 
 
 def save_custom_provider(
-    *,
-    provider_id: str,
-    label: str,
-    base_url: str,
-    default_model: str,
-    models: Iterable[str],
-    api_key: str | None,
-    enabled: bool,
-    tier: str,
-    priority: int,
-    settings: Settings | None = None,
+    *, provider_id: str, label: str, base_url: str, default_model: str, models: Iterable[str],
+    api_key: str | None, enabled: bool, tier: str, priority: int, settings: Settings | None = None,
 ) -> ProviderSpec:
     settings = settings or get_settings()
     normalized_id = provider_id.strip().lower()
@@ -525,22 +406,12 @@ def save_custom_provider(
         normalized_models = (normalized_default, *normalized_models)
     env_name = f"AI_PROVIDER_{normalized_id.upper().replace('-', '_')}_API_KEY"
     row = {
-        "id": normalized_id,
-        "label": label.strip()[:80] or normalized_id,
-        "kind": "openai-compatible",
-        "base_url": base_url.rstrip("/"),
-        "default_model": normalized_default,
-        "models": list(normalized_models),
-        "credential_env": env_name,
-        "enabled": bool(enabled),
-        "tier": tier if tier in _ALLOWED_TIERS else "custom",
+        "id": normalized_id, "label": label.strip()[:80] or normalized_id, "kind": "openai-compatible",
+        "base_url": base_url.rstrip("/"), "default_model": normalized_default, "models": list(normalized_models),
+        "credential_env": env_name, "enabled": bool(enabled), "tier": tier if tier in _ALLOWED_TIERS else "custom",
         "priority": max(1, min(int(priority), 999)),
     }
-    rows = [
-        item
-        for item in _load_custom_rows(settings)
-        if str(item.get("id") or "").strip().lower() != normalized_id
-    ]
+    rows = [item for item in _load_custom_rows(settings) if str(item.get("id") or "").strip().lower() != normalized_id]
     rows.append(row)
     _save_custom_rows(rows, settings)
     if api_key:
@@ -556,11 +427,7 @@ def delete_custom_provider(provider_id: str, settings: Settings | None = None) -
     settings = settings or get_settings()
     normalized = provider_id.strip().lower()
     rows = _load_custom_rows(settings)
-    remaining = [
-        item
-        for item in rows
-        if str(item.get("id") or "").strip().lower() != normalized
-    ]
+    remaining = [item for item in rows if str(item.get("id") or "").strip().lower() != normalized]
     if len(remaining) == len(rows):
         return False
     _save_custom_rows(remaining, settings)
@@ -569,12 +436,8 @@ def delete_custom_provider(provider_id: str, settings: Settings | None = None) -
 
 
 def builtin_env_updates(
-    provider_id: str,
-    *,
-    api_key: str | None = None,
-    base_url: str | None = None,
-    default_model: str | None = None,
-    models: Iterable[str] | None = None,
+    provider_id: str, *, api_key: str | None = None, base_url: str | None = None,
+    default_model: str | None = None, models: Iterable[str] | None = None,
     settings: Settings | None = None,
 ) -> dict[str, str]:
     settings = settings or get_settings()
@@ -592,8 +455,8 @@ def builtin_env_updates(
         "cohere": {"key": "COHERE_API_KEY", "base": "COHERE_BASE_URL", "model": "COHERE_MODEL", "models": "COHERE_MODELS"},
         "huggingface": {"key": "HF_TOKEN", "base": "HUGGINGFACE_BASE_URL", "model": "HUGGINGFACE_MODEL", "models": "HUGGINGFACE_MODELS"},
         "cerebras": {"key": "CEREBRAS_API_KEY", "base": "CEREBRAS_BASE_URL", "model": "CEREBRAS_MODEL", "models": "CEREBRAS_MODELS"},
-        "vllm": {"base": "VLLM_BASE_URL", "model": "VLLM_MODEL", "models": "VLLM_MODELS"},
-        "llamacpp": {"base": "LLAMACPP_BASE_URL", "model": "LLAMACPP_MODEL", "models": "LLAMACPP_MODELS"},
+        "vllm": {"key": "VLLM_API_KEY", "base": "VLLM_BASE_URL", "model": "VLLM_MODEL", "models": "VLLM_MODELS"},
+        "llamacpp": {"key": "LLAMACPP_API_KEY", "base": "LLAMACPP_BASE_URL", "model": "LLAMACPP_MODEL", "models": "LLAMACPP_MODELS"},
     }
     if normalized not in mapping:
         raise ValueError("provedor nativo desconhecido")
@@ -617,8 +480,5 @@ def public_registry(settings: Settings | None = None) -> dict[str, Any]:
     return {
         "registry_path": str(_registry_path(settings)),
         "env_path": str(_env_path(settings)),
-        "providers": [
-            item.public_dict(settings)
-            for item in provider_specs(settings, include_disabled=True)
-        ],
+        "providers": [item.public_dict(settings) for item in provider_specs(settings, include_disabled=True)],
     }
