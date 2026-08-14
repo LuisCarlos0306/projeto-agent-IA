@@ -15,6 +15,7 @@ def _settings(**overrides):
         "omniroute_routes": "Infra segura=infra-safe,Análise rápida=infra-fast",
         "gemini_api_key": "gemini-token",
         "gemini_model": "gemini-test",
+        "groq_model": "llama-test",
         "ollama_model": "ollama-test",
     }
     values.update(overrides)
