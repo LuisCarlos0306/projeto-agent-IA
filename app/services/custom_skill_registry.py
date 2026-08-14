@@ -54,10 +54,14 @@ def allowed_script_roots() -> tuple[str, ...]:
     return tuple(dict.fromkeys(roots)) or DEFAULT_SCRIPT_ROOTS
 
 
+def _schema_version(payload: dict[str, Any]) -> int:
+    return 3 if any(isinstance(item, dict) and item.get("condition") for item in payload.get("skills") or []) else 2
+
+
 def _read(path: Path | None = None) -> dict[str, Any]:
     target = path or registry_path()
     if not target.exists():
-        return {"schema_version": 3, "skills": []}
+        return {"schema_version": 2, "skills": []}
     try:
         payload = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -70,14 +74,14 @@ def _read(path: Path | None = None) -> dict[str, Any]:
         skill.setdefault("mode", "read_only")
         skill.setdefault("scripts", [])
         skill.setdefault("condition", None)
-    payload["schema_version"] = 3
+    payload["schema_version"] = _schema_version(payload)
     return payload
 
 
 def _write(payload: dict[str, Any], path: Path | None = None) -> None:
     target = path or registry_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    payload = {**payload, "schema_version": 3}
+    payload = {**payload, "schema_version": _schema_version(payload)}
     fd, tmp_name = tempfile.mkstemp(prefix="custom-skills-", suffix=".json", dir=str(target.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -144,7 +148,6 @@ def validate_custom_command(command: str, mode: str = "read_only") -> str:
     clean_mode = _clean_mode(mode)
     if clean_mode != "read_only":
         return raw
-
     if any(token in raw for token in _FORBIDDEN_SYNTAX):
         raise ValueError("pipes, redirecionamentos, substituições e encadeamentos não são permitidos em Skill de Leitura")
     try:
@@ -176,9 +179,7 @@ def validate_script_path(script: str) -> str:
         raise ValueError("o script deve usar caminho absoluto sem ..")
     normalized = posixpath.normpath(raw)
     if not any(normalized == root or normalized.startswith(root + "/") for root in allowed_script_roots()):
-        raise ValueError(
-            "script fora dos diretórios permitidos; configure AGENT_CUSTOM_SKILL_SCRIPT_ROOTS se necessário"
-        )
+        raise ValueError("script fora dos diretórios permitidos; configure AGENT_CUSTOM_SKILL_SCRIPT_ROOTS se necessário")
     return normalized
 
 
@@ -193,7 +194,6 @@ def normalize_condition(condition: dict[str, Any] | None, mode: str) -> dict[str
     clean_mode = _clean_mode(mode)
     if clean_mode == "read_only":
         raise ValueError("fluxo condicional com ação corretiva exige Skill de Diagnóstico ou Correção")
-
     validation = validate_custom_command(str(condition.get("validation") or ""), "read_only")
     post_validation = validate_custom_command(str(condition.get("post_validation") or ""), "read_only")
     operator = str(condition.get("operator") or "exit_code_nonzero").strip().casefold()
@@ -202,14 +202,12 @@ def normalize_condition(condition: dict[str, Any] | None, mode: str) -> dict[str
     expected = str(condition.get("expected") or "").strip()[:300]
     if operator in {"stdout_contains", "stdout_not_contains"} and not expected:
         raise ValueError("informe o texto esperado para a condição de saída")
-
     raw_action = dict(condition.get("action") or {})
     action_type = str(raw_action.get("type") or "command").strip().casefold()
     if action_type not in {"command", "script"}:
         raise ValueError("ação condicional deve ser comando ou script")
     raw_value = str(raw_action.get("value") or "").strip()
     action_value = validate_script_path(raw_value) if action_type == "script" else validate_custom_command(raw_value, clean_mode)
-
     messages = dict(condition.get("messages") or {})
     return {
         "enabled": True,
@@ -226,14 +224,7 @@ def normalize_condition(condition: dict[str, Any] | None, mode: str) -> dict[str
     }
 
 
-def _normalized_payload(
-    name: str,
-    commands: list[str],
-    scripts: list[str],
-    description: str,
-    mode: str,
-    condition: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+def _normalized_payload(name: str, commands: list[str], scripts: list[str], description: str, mode: str, condition: dict[str, Any] | None = None) -> dict[str, Any]:
     clean_name = _clean_name(name)
     clean_mode = _clean_mode(mode)
     clean_commands = [validate_custom_command(item, clean_mode) for item in commands if str(item or "").strip()]
@@ -247,14 +238,7 @@ def _normalized_payload(
         raise ValueError("cada skill pode ter no máximo 10 scripts")
     if clean_mode == "read_only" and clean_scripts:
         raise ValueError("Skills de leitura não aceitam scripts; use Diagnóstico ou Correção")
-    return {
-        "name": clean_name,
-        "description": str(description or "").strip()[:300],
-        "commands": list(dict.fromkeys(clean_commands)),
-        "scripts": list(dict.fromkeys(clean_scripts)),
-        "mode": clean_mode,
-        "condition": clean_condition,
-    }
+    return {"name": clean_name, "description": str(description or "").strip()[:300], "commands": list(dict.fromkeys(clean_commands)), "scripts": list(dict.fromkeys(clean_scripts)), "mode": clean_mode, "condition": clean_condition}
 
 
 def list_custom_skills(path: Path | None = None) -> list[dict[str, Any]]:
@@ -266,16 +250,7 @@ def get_custom_skill(skill_id: str, path: Path | None = None) -> dict[str, Any] 
     return next((item for item in list_custom_skills(path) if item.get("id") == sid), None)
 
 
-def create_custom_skill(
-    name: str,
-    commands: list[str],
-    *,
-    scripts: list[str] | None = None,
-    description: str = "",
-    mode: str = "read_only",
-    condition: dict[str, Any] | None = None,
-    path: Path | None = None,
-) -> dict[str, Any]:
+def create_custom_skill(name: str, commands: list[str], *, scripts: list[str] | None = None, description: str = "", mode: str = "read_only", condition: dict[str, Any] | None = None, path: Path | None = None) -> dict[str, Any]:
     data = _normalized_payload(name, commands, scripts or [], description, mode, condition)
     payload = _read(path)
     if any(str(item.get("name") or "").casefold() == data["name"].casefold() for item in payload["skills"]):
@@ -287,26 +262,13 @@ def create_custom_skill(
     return skill
 
 
-def update_custom_skill(
-    skill_id: str,
-    *,
-    name: str,
-    commands: list[str],
-    scripts: list[str] | None = None,
-    description: str = "",
-    mode: str = "read_only",
-    condition: dict[str, Any] | None = None,
-    path: Path | None = None,
-) -> dict[str, Any]:
+def update_custom_skill(skill_id: str, *, name: str, commands: list[str], scripts: list[str] | None = None, description: str = "", mode: str = "read_only", condition: dict[str, Any] | None = None, path: Path | None = None) -> dict[str, Any]:
     data = _normalized_payload(name, commands, scripts or [], description, mode, condition)
     payload = _read(path)
     skill = next((item for item in payload["skills"] if item.get("id") == skill_id), None)
     if skill is None:
         raise LookupError("skill personalizada não encontrada")
-    if any(
-        item.get("id") != skill_id and str(item.get("name") or "").casefold() == data["name"].casefold()
-        for item in payload["skills"]
-    ):
+    if any(item.get("id") != skill_id and str(item.get("name") or "").casefold() == data["name"].casefold() for item in payload["skills"]):
         raise ValueError("já existe uma skill personalizada com esse nome")
     skill.update(data)
     skill["updated_at"] = _now()
