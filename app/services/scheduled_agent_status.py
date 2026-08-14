@@ -10,10 +10,7 @@ from app.services.scheduled_agent_run_log import execution_outcome, record_run_d
 
 
 def _action_text(action: dict[str, Any]) -> str:
-    return " ".join(
-        str(action.get(key) or "")
-        for key in ("command", "path", "action", "description", "name")
-    ).strip().casefold()
+    return " ".join(str(action.get(key) or "") for key in ("command", "path", "action", "description", "name")).strip().casefold()
 
 
 def _is_mount_action(action: dict[str, Any]) -> bool:
@@ -30,13 +27,7 @@ def _action_succeeded(action: dict[str, Any]) -> bool:
             return int(exit_code) == 0
         except (TypeError, ValueError):
             return False
-    return str(action.get("status") or "").casefold() in {
-        "success",
-        "succeeded",
-        "completed",
-        "healthy",
-        "ok",
-    }
+    return str(action.get("status") or "").casefold() in {"success", "succeeded", "completed", "healthy", "ok"}
 
 
 def _post_validation_confirmed(action: dict[str, Any]) -> bool:
@@ -96,14 +87,8 @@ def correction_outcome(result: dict[str, Any], terminal_state: str = "completed"
 
     pending_commands = [item for item in result.get("pending_commands") or [] if isinstance(item, dict)]
     pending_scripts = [item for item in result.get("scripts") or [] if isinstance(item, dict)]
-    awaiting = [
-        item for item in [*pending_commands, *pending_scripts]
-        if str(item.get("status") or "") == "pending_approval"
-    ]
-    blocked = [
-        item for item in pending_commands
-        if str(item.get("status") or "") == "blocked_by_policy"
-    ]
+    awaiting = [item for item in [*pending_commands, *pending_scripts] if str(item.get("status") or "") == "pending_approval"]
+    blocked = [item for item in pending_commands if str(item.get("status") or "") == "blocked_by_policy"]
     if awaiting:
         mount_pending = any(_is_mount_action(item) for item in awaiting)
         suffix = f" {len(blocked)} ação(ões) adicional(is) estão bloqueadas pela política." if blocked else ""
@@ -117,7 +102,9 @@ def correction_outcome(result: dict[str, Any], terminal_state: str = "completed"
         return "blocked", f"{len(blocked)} ação(ões) corretiva(s) foram bloqueadas pela política do ambiente."
     if terminal_state in {"failed", "cancelled"}:
         return "not_evaluated", "A execução terminou antes de confirmar necessidade ou resultado de correção."
-    return "not_needed", "Nenhuma correção foi necessária nesta validação."
+    if result.get("action_needed") is False:
+        return "not_needed", str(result.get("correction_message") or "Validação concluída. Nenhuma ação necessária.")
+    return "not_needed", str(result.get("correction_message") or "Nenhuma correção foi necessária nesta validação.")
 
 
 def reconcile_agent_statuses(*, settings: Settings | None = None) -> int:
@@ -150,13 +137,7 @@ def reconcile_agent_statuses(*, settings: Settings | None = None) -> int:
         correction_status, correction_message = correction_outcome(result, state)
 
         record_run_detail(agent_id, job, result)
-        update_agent_runtime(
-            agent_id,
-            status=final_status,
-            summary=summary,
-            error=error,
-            mark_run=True,
-        )
+        update_agent_runtime(agent_id, status=final_status, summary=summary, error=error, mark_run=True)
         record_agent_history(
             agent_id,
             job_id=job_id,
