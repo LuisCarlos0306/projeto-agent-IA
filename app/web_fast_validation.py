@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse
 from app.web import UI_DIR, _require_access
 
 
-ASSET_VERSION = "1.30.34"
+ASSET_VERSION = "1.30.35"
 
 
 def _bool(name: str, default: bool) -> bool:

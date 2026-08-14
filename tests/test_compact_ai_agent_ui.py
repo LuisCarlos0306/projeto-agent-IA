@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_compact_provider_assets_are_loaded() -> None:
     html = _enhanced_index()
 
-    assert ASSET_VERSION == "1.30.34"
+    assert ASSET_VERSION == "1.30.35"
     assert f"/ui/assets/provider-compact-ui.css?v={ASSET_VERSION}" in html
     assert f"/ui/assets/provider-compact-ui.js?v={ASSET_VERSION}" in html
     assert f"/ui/assets/agents-v3.js?v={ASSET_VERSION}" in html
