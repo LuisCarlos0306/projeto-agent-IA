@@ -13,6 +13,13 @@ from app.web import _require_access
 router = APIRouter(tags=["interface-cache"])
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _UI_DIR = Path(__file__).resolve().parent / "ui"
+# Templates mantidos como contrato de regressão dos assets centrais da interface.
+_VERSIONED_AGENT_ASSET_TEMPLATES = (
+    "agents-v2.css?v={_ASSET_VERSION}",
+    "agents-v2.js?v={_ASSET_VERSION}",
+    "application-map.css?v={_ASSET_VERSION}",
+    "application-map.js?v={_ASSET_VERSION}",
+)
 
 
 def _asset_version() -> str:
