@@ -133,6 +133,39 @@ def record_agent_history(
             session.rollback()
 
 
+def update_agent_history_result(
+    agent_id: str,
+    *,
+    job_id: str,
+    status: str,
+    summary: str,
+    error: str,
+    correction_status: str,
+    correction_message: str,
+) -> None:
+    """Atualiza a mesma execução depois de uma correção humana aprovada."""
+    ensure_database_schema()
+    try:
+        identifier = uuid.UUID(str(agent_id))
+    except ValueError:
+        return
+    with SessionLocal() as session:
+        row = session.scalar(
+            select(AgentRunHistoryORM).where(
+                AgentRunHistoryORM.agent_id == identifier,
+                AgentRunHistoryORM.job_id == str(job_id)[:64],
+            )
+        )
+        if row is None:
+            return
+        row.status = str(status or row.status)[:40]
+        row.summary = str(summary or "")[:4000] or None
+        row.error = str(error or "")[:4000] or None
+        row.correction_status = str(correction_status or "not_needed")[:40]
+        row.correction_message = str(correction_message or "")[:4000] or None
+        session.commit()
+
+
 def serialize_agent(row: ScheduledAgentORM) -> dict[str, Any]:
     skill = get_custom_skill(row.skill_id)
     return {
