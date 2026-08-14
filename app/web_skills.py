@@ -9,21 +9,13 @@ from app.core.policies import EnvironmentType
 from app.core.settings import get_settings
 from app.services.backup_storage_registry import DEFAULT_MOUNT_SCRIPT, get_mapping, save_mapping
 from app.services.custom_skill_jobs import enqueue_custom_skill
-from app.services.custom_skill_registry import (
-    create_custom_skill,
-    delete_custom_skill,
-    get_custom_skill,
-    list_custom_skills,
-    update_custom_skill,
-)
+from app.services.custom_skill_registry import create_custom_skill, delete_custom_skill, get_custom_skill, list_custom_skills, update_custom_skill
 from app.services.custom_skill_runner import run_custom_skill
 from app.services.jobs import enqueue_backup_validation, get_job
 from app.services.mapped_backup_validation import run_backup_validation
 from app.web import _operator_name, _require_access, _require_mutation
 
-
 router = APIRouter(prefix="/ui/api/skills", tags=["interface-skills"])
-
 
 class StorageUnitPayload(BaseModel):
     mount_point: str = Field(min_length=1, max_length=1024)
@@ -31,12 +23,10 @@ class StorageUnitPayload(BaseModel):
     label: str = Field(default="", max_length=120)
     min_free_percent: int = Field(default=20, ge=1, le=99)
 
-
 class StorageMappingPayload(BaseModel):
     target: str = Field(min_length=1, max_length=255)
     mount_script: str = Field(default=DEFAULT_MOUNT_SCRIPT, min_length=1, max_length=1024)
     units: list[StorageUnitPayload] = Field(min_length=1, max_length=30)
-
 
 class BackupValidationPayload(BaseModel):
     target: str = Field(min_length=1, max_length=255)
@@ -50,6 +40,23 @@ class BackupValidationPayload(BaseModel):
     retention_days: int = Field(default=7, ge=1, le=365)
     min_restore_points: int = Field(default=1, ge=1, le=500)
 
+class ConditionalActionPayload(BaseModel):
+    type: str = Field(default="command", max_length=16)
+    value: str = Field(min_length=1, max_length=1024)
+
+class ConditionalMessagesPayload(BaseModel):
+    no_action: str = Field(default="", max_length=300)
+    success: str = Field(default="", max_length=300)
+    failure: str = Field(default="", max_length=300)
+
+class CustomSkillConditionPayload(BaseModel):
+    enabled: bool = False
+    validation: str = Field(default="", max_length=1000)
+    operator: str = Field(default="exit_code_nonzero", max_length=32)
+    expected: str = Field(default="", max_length=300)
+    action: ConditionalActionPayload | None = None
+    post_validation: str = Field(default="", max_length=1000)
+    messages: ConditionalMessagesPayload = Field(default_factory=ConditionalMessagesPayload)
 
 class CustomSkillPayload(BaseModel):
     name: str = Field(min_length=2, max_length=80)
@@ -57,67 +64,41 @@ class CustomSkillPayload(BaseModel):
     mode: str = Field(default="read_only", max_length=32)
     commands: list[str] = Field(default_factory=list, max_length=20)
     scripts: list[str] = Field(default_factory=list, max_length=10)
-
+    condition: CustomSkillConditionPayload | None = None
 
 class CustomSkillRunPayload(BaseModel):
     target: str = Field(min_length=1, max_length=255)
 
+def _condition(payload: CustomSkillPayload) -> dict[str, Any] | None:
+    return payload.condition.model_dump(mode="json") if payload.condition is not None else None
 
 @router.get("")
 def skill_runtime_status(request: Request) -> dict[str, Any]:
     _require_access(request)
     settings = get_settings()
-    return {
-        "skills": {
-            "backup_validation": {
-                "status": "active",
-                "version": "1.3.0",
-                "execution": "read_only",
-                "execution_mode": settings.agent_execution_mode,
-                "storage_source": "manual_mapping",
-                "mount_action": "validation_request_only",
-            }
-        },
-        "custom_skills": list_custom_skills(),
-    }
-
+    return {"skills": {"backup_validation": {"status": "active", "version": "1.3.0", "execution": "read_only", "execution_mode": settings.agent_execution_mode, "storage_source": "manual_mapping", "mount_action": "validation_request_only"}}, "custom_skills": list_custom_skills()}
 
 @router.get("/custom")
 def custom_skills(request: Request) -> dict[str, Any]:
     _require_access(request)
     return {"skills": list_custom_skills()}
 
-
 @router.post("/custom")
 def create_skill(payload: CustomSkillPayload, request: Request) -> dict[str, Any]:
     _require_mutation(request)
     try:
-        skill = create_custom_skill(
-            payload.name,
-            payload.commands,
-            scripts=payload.scripts,
-            description=payload.description,
-            mode=payload.mode,
-        )
+        skill = create_custom_skill(payload.name, payload.commands, scripts=payload.scripts, description=payload.description, mode=payload.mode, condition=_condition(payload))
     except (OSError, RuntimeError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "created", "skill": skill, "operator": _operator_name()}
 
-
 @router.put("/custom/{skill_id}")
 def edit_skill(skill_id: str, payload: CustomSkillPayload, request: Request) -> dict[str, Any]:
     _require_mutation(request)
     try:
-        skill = update_custom_skill(
-            skill_id,
-            name=payload.name,
-            commands=payload.commands,
-            scripts=payload.scripts,
-            description=payload.description,
-            mode=payload.mode,
-        )
+        skill = update_custom_skill(skill_id, name=payload.name, commands=payload.commands, scripts=payload.scripts, description=payload.description, mode=payload.mode, condition=_condition(payload))
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (OSError, RuntimeError) as exc:
@@ -125,7 +106,6 @@ def edit_skill(skill_id: str, payload: CustomSkillPayload, request: Request) -> 
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "updated", "skill": skill, "operator": _operator_name()}
-
 
 @router.delete("/custom/{skill_id}")
 def remove_skill(skill_id: str, request: Request) -> dict[str, Any]:
@@ -138,7 +118,6 @@ def remove_skill(skill_id: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="skill personalizada não encontrada")
     return {"status": "deleted", "skill_id": skill_id, "operator": _operator_name()}
 
-
 @router.post("/custom/{skill_id}/run")
 def execute_custom_skill(skill_id: str, payload: CustomSkillRunPayload, request: Request) -> dict[str, Any]:
     _require_mutation(request)
@@ -147,22 +126,11 @@ def execute_custom_skill(skill_id: str, payload: CustomSkillRunPayload, request:
     settings = get_settings()
     if settings.agent_execution_mode.strip().casefold() == "queue":
         try:
-            return enqueue_custom_skill(
-                skill_id,
-                payload.target.strip(),
-                metadata={"source": "web_ui_custom_skill", "operator": _operator_name()},
-                settings=settings,
-            )
+            return enqueue_custom_skill(skill_id, payload.target.strip(), metadata={"source": "web_ui_custom_skill", "operator": _operator_name()}, settings=settings)
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"fila indisponível: {type(exc).__name__}: {exc}") from exc
     try:
-        result = run_custom_skill(
-            skill_id,
-            payload.target.strip(),
-            environment=EnvironmentType.UNKNOWN,
-            ssh_port=None,
-            settings=settings,
-        )
+        result = run_custom_skill(skill_id, payload.target.strip(), environment=EnvironmentType.UNKNOWN, ssh_port=None, settings=settings)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (ValueError, PermissionError) as exc:
@@ -172,7 +140,6 @@ def execute_custom_skill(skill_id: str, payload: CustomSkillRunPayload, request:
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
     return {"status": "completed", "job_type": "skill", "skill": f"custom:{skill_id}", "result": result}
-
 
 @router.get("/custom/jobs/{job_id}")
 def custom_skill_job(job_id: str, request: Request) -> dict[str, Any]:
@@ -185,7 +152,6 @@ def custom_skill_job(job_id: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="job de skill personalizada não encontrado ou expirado")
     return result
 
-
 @router.get("/backup-validation/mappings/{target:path}")
 def read_backup_mapping(target: str, request: Request) -> dict[str, Any]:
     _require_access(request)
@@ -194,7 +160,6 @@ def read_backup_mapping(target: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="servidor ainda não possui mapeamento de storage")
     return mapping
 
-
 @router.post("/backup-validation/mappings")
 def write_backup_mapping(payload: StorageMappingPayload, request: Request) -> dict[str, Any]:
     _require_mutation(request)
@@ -202,46 +167,20 @@ def write_backup_mapping(payload: StorageMappingPayload, request: Request) -> di
         mapping = save_mapping(payload.model_dump(mode="json"))
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {
-        "status": "saved",
-        "mapping": mapping,
-        "operator": _operator_name(),
-    }
-
+    return {"status": "saved", "mapping": mapping, "operator": _operator_name()}
 
 @router.post("/backup-validation/run")
 def execute_backup_validation(payload: BackupValidationPayload, request: Request) -> dict[str, Any]:
     _require_mutation(request)
     settings = get_settings()
     if not get_mapping(payload.target.strip()):
-        raise HTTPException(
-            status_code=422,
-            detail="servidor sem mapeamento. Cadastre primeiro o script e as unidades esperadas na configuração da skill.",
-        )
-
-    common = {
-        "backup_path": "",
-        "mount_point": None,
-        "redundancy_path": None,
-        "environment": payload.environment,
-        "ssh_port": payload.ssh_port,
-        "min_free_percent": payload.min_free_percent,
-        "max_backup_age_hours": payload.max_backup_age_hours,
-        "retention_days": payload.retention_days,
-        "min_restore_points": payload.min_restore_points,
-        "settings": settings,
-    }
-
+        raise HTTPException(status_code=422, detail="servidor sem mapeamento. Cadastre primeiro o script e as unidades esperadas na configuração da skill.")
+    common = {"backup_path": "", "mount_point": None, "redundancy_path": None, "environment": payload.environment, "ssh_port": payload.ssh_port, "min_free_percent": payload.min_free_percent, "max_backup_age_hours": payload.max_backup_age_hours, "retention_days": payload.retention_days, "min_restore_points": payload.min_restore_points, "settings": settings}
     if settings.agent_execution_mode.strip().casefold() == "queue":
         try:
-            return enqueue_backup_validation(
-                payload.target.strip(),
-                metadata={"source": "web_ui_skill_mapped", "operator": _operator_name()},
-                **common,
-            )
+            return enqueue_backup_validation(payload.target.strip(), metadata={"source": "web_ui_skill_mapped", "operator": _operator_name()}, **common)
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"fila indisponível: {type(exc).__name__}: {exc}") from exc
-
     try:
         result = run_backup_validation(payload.target.strip(), **common)
     except LookupError as exc:
@@ -253,7 +192,6 @@ def execute_backup_validation(payload: BackupValidationPayload, request: Request
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
     return {"status": "completed", "job_type": "skill", "skill": "backup_validation", "result": result}
-
 
 @router.get("/jobs/{job_id}")
 def skill_job(job_id: str, request: Request) -> dict[str, Any]:

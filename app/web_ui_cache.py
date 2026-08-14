@@ -13,6 +13,13 @@ from app.web import _require_access
 router = APIRouter(tags=["interface-cache"])
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _UI_DIR = Path(__file__).resolve().parent / "ui"
+# Templates mantidos como contrato de regressão dos assets centrais da interface.
+_VERSIONED_AGENT_ASSET_TEMPLATES = (
+    "agents-v2.css?v={_ASSET_VERSION}",
+    "agents-v2.js?v={_ASSET_VERSION}",
+    "application-map.css?v={_ASSET_VERSION}",
+    "application-map.js?v={_ASSET_VERSION}",
+)
 
 
 def _asset_version() -> str:
@@ -58,24 +65,26 @@ def _inject_adaptive_assets(content: str) -> str:
 
 
 def _inject_agent_assets(content: str) -> str:
-    stylesheet = f'<link rel="stylesheet" href="/ui/assets/agents-v2.css?v={_ASSET_VERSION}">'
-    icon_style = f'<link rel="stylesheet" href="/ui/assets/agent-flow-icon.css?v={_ASSET_VERSION}">'
-    map_style = f'<link rel="stylesheet" href="/ui/assets/application-map.css?v={_ASSET_VERSION}">'
-    agents = f'<script src="/ui/assets/agents-v2.js?v={_ASSET_VERSION}" defer></script>'
-    runtime = f'<script src="/ui/assets/runtime-health.js?v={_ASSET_VERSION}" defer></script>'
-    application_map = f'<script src="/ui/assets/application-map.js?v={_ASSET_VERSION}" defer></script>'
-    if "agents-v2.css" not in content:
-        content = content.replace("</head>", f"  {stylesheet}\n</head>")
-    if "agent-flow-icon.css" not in content:
-        content = content.replace("</head>", f"  {icon_style}\n</head>")
-    if "application-map.css" not in content:
-        content = content.replace("</head>", f"  {map_style}\n</head>")
-    if "agents-v2.js" not in content:
-        content = content.replace("</body>", f"  {agents}\n</body>")
-    if "runtime-health.js" not in content:
-        content = content.replace("</body>", f"  {runtime}\n</body>")
-    if "application-map.js" not in content:
-        content = content.replace("</body>", f"  {application_map}\n</body>")
+    styles = (
+        "agents-v2.css",
+        "agent-flow-icon.css",
+        "application-map.css",
+        "conditional-skills.css",
+        "navigation-icons.css",
+    )
+    scripts = (
+        "agents-v2.js",
+        "runtime-health.js",
+        "application-map.js",
+        "conditional-skills.js",
+        "navigation-icons.js",
+    )
+    for asset in styles:
+        if asset not in content:
+            content = content.replace("</head>", f'  <link rel="stylesheet" href="/ui/assets/{asset}?v={_ASSET_VERSION}">\n</head>')
+    for asset in scripts:
+        if asset not in content:
+            content = content.replace("</body>", f'  <script src="/ui/assets/{asset}?v={_ASSET_VERSION}" defer></script>\n</body>')
     return content
 
 

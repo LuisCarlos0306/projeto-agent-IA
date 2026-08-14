@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse
 from app.web import UI_DIR, _require_access
 
 
-ASSET_VERSION = "1.30.31"
+ASSET_VERSION = "1.30.32"
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -42,16 +42,10 @@ def _float(name: str, default: float, *, minimum: float, maximum: float) -> floa
 
 
 def focused_validation_payload() -> dict[str, object]:
-    investigation_seconds = _int(
-        "AGENT_FAST_INVESTIGATION_SECONDS",
-        240,
-        minimum=60,
-        maximum=900,
-    )
+    investigation_seconds = _int("AGENT_FAST_INVESTIGATION_SECONDS", 240, minimum=60, maximum=900)
     hard_timeout = _int(
         "AGENT_JOB_HARD_TIMEOUT_SECONDS",
-        investigation_seconds
-        + _int("AGENT_JOB_HARD_TIMEOUT_GRACE_SECONDS", 15, minimum=5, maximum=120),
+        investigation_seconds + _int("AGENT_JOB_HARD_TIMEOUT_GRACE_SECONDS", 15, minimum=5, maximum=120),
         minimum=60,
         maximum=1800,
     )
@@ -65,12 +59,7 @@ def focused_validation_payload() -> dict[str, object]:
         "max_investigation_seconds": investigation_seconds,
         "hard_timeout_seconds": hard_timeout,
         "max_host_seconds": _int("AGENT_FAST_HOST_SECONDS", 180, minimum=30, maximum=600),
-        "ai_request_timeout_seconds": _float(
-            "AGENT_AI_REQUEST_TIMEOUT_SECONDS",
-            25.0,
-            minimum=5.0,
-            maximum=90.0,
-        ),
+        "ai_request_timeout_seconds": _float("AGENT_AI_REQUEST_TIMEOUT_SECONDS", 25.0, minimum=5.0, maximum=90.0),
     }
 
 
@@ -100,10 +89,7 @@ def _inline_cyber_theme(html: str) -> str:
     if not theme_path.exists():
         return html
     css = theme_path.read_text(encoding="utf-8")
-    return html.replace(
-        "</head>",
-        f'  <style id="agent-cyber-theme-inline">\n{css}\n  </style>\n</head>',
-    )
+    return html.replace("</head>", f'  <style id="agent-cyber-theme-inline">\n{css}\n  </style>\n</head>')
 
 
 def _inline_cyber_brand(html: str) -> str:
@@ -129,18 +115,22 @@ def _enhanced_index() -> str:
         "cyber-theme.css",
         "skills.css",
         "custom-skills.css",
+        "conditional-skills.css",
         "agents-v2.css",
         "agent-flow-icon.css",
         "application-map.css",
+        "navigation-icons.css",
     ):
         html = _versioned_stylesheet(html, asset)
     for asset in (
         "fast-validation-ui.js",
         "investigation-confidence.js",
         "skills.js",
+        "conditional-skills.js",
         "agents-v2.js",
         "runtime-health.js",
         "application-map.js",
+        "navigation-icons.js",
     ):
         html = _versioned_script(html, asset)
     html = _inline_cyber_brand(html)

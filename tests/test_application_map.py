@@ -29,24 +29,9 @@ def test_application_map_exposes_full_architecture_and_views(monkeypatch) -> Non
 
     assert {"architecture", "runtime", "data", "security"} == views
     assert {
-        "ui",
-        "fastapi",
-        "orchestrator",
-        "skills",
-        "playbooks",
-        "agents",
-        "scheduler",
-        "ai_router",
-        "reviewer",
-        "policies",
-        "redis",
-        "postgres",
-        "worker",
-        "runner",
-        "ssh",
-        "post_validation",
-        "servers",
-        "audit",
+        "ui", "fastapi", "orchestrator", "skills", "playbooks", "agents", "scheduler",
+        "ai_router", "reviewer", "policies", "redis", "postgres", "worker", "runner",
+        "ssh", "post_validation", "servers", "audit",
     }.issubset(ids)
     assert any(edge["kind"] == "async" for edge in payload["edges"])
     assert any(edge["kind"] == "security" for edge in payload["edges"])
@@ -82,8 +67,9 @@ def test_application_map_ui_replaces_agent_flow_and_has_graph_controls() -> None
     assert 'APIRouter(prefix="/ui/api/application-map"' in web
     assert '"application-map.css"' in fast
     assert '"application-map.js"' in fast
-    assert "application-map.css?v={_ASSET_VERSION}" in cache
-    assert "application-map.js?v={_ASSET_VERSION}" in cache
+    assert '"application-map.css"' in cache
+    assert '"application-map.js"' in cache
+    assert "_inject_agent_assets(content)" in cache
 
 
 def test_application_map_preserves_correction_guardrails() -> None:
