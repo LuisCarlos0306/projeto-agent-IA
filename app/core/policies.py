@@ -17,6 +17,7 @@ class ActionType(StrEnum):
     READ_ONLY = "read_only"
     SERVICE_ADJUSTMENT = "service_adjustment"
     OMD_ADJUSTMENT = "omd_adjustment"
+    FILESYSTEM_ADJUSTMENT = "filesystem_adjustment"
     CONTAINER_ADJUSTMENT = "container_adjustment"
     DESTRUCTIVE = "destructive"
     HOST_REBOOT = "host_reboot"
@@ -60,6 +61,10 @@ DESTRUCTIVE_RE = re.compile(
 )
 OMD_ADJUST_RE = re.compile(r"\bomd\s+(start|restart)\b", re.I)
 SERVICE_ADJUST_RE = re.compile(r"\b(systemctl\s+(start|restart|reload|enable)|service\s+\S+\s+(start|restart|reload))\b", re.I)
+FILESYSTEM_ADJUST_RE = re.compile(
+    r"^(?:(?:sudo\s+)?(?:mount|umount)\b|/db/backup/scripts/mount\.sh$)",
+    re.I,
+)
 
 
 def classify_command(command: str) -> ActionType:
@@ -76,6 +81,8 @@ def classify_command(command: str) -> ActionType:
         return ActionType.OMD_ADJUSTMENT
     if DESTRUCTIVE_RE.search(command):
         return ActionType.DESTRUCTIVE
+    if FILESYSTEM_ADJUST_RE.search(command):
+        return ActionType.FILESYSTEM_ADJUSTMENT
     if OMD_ADJUST_RE.search(command):
         return ActionType.OMD_ADJUSTMENT
     if SERVICE_ADJUST_RE.search(command):
@@ -101,7 +108,7 @@ def evaluate_action(action: ActionType, environment: EnvironmentType) -> PolicyD
         return PolicyDecision(False, False, "Stop, start, restart, kill ou remoção de container são proibidos.", "CONTAINER_LIFECYCLE_DENIED")
     if action == ActionType.DESTRUCTIVE:
         return PolicyDecision(False, True, "Remoção, exclusão, desinstalação ou parada isolada não é executada automaticamente.", "DESTRUCTIVE_ACTION_DENIED")
-    if action in {ActionType.SERVICE_ADJUSTMENT, ActionType.OMD_ADJUSTMENT}:
+    if action in {ActionType.SERVICE_ADJUSTMENT, ActionType.OMD_ADJUSTMENT, ActionType.FILESYSTEM_ADJUSTMENT}:
         if environment == EnvironmentType.UNKNOWN:
             return PolicyDecision(False, True, "O ambiente precisa ser classificado antes de qualquer alteração.", "UNKNOWN_ENVIRONMENT_CHANGE_DENIED")
         if environment in {EnvironmentType.PRODUCTION, EnvironmentType.STANDBY}:
