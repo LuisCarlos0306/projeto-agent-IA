@@ -7,31 +7,32 @@ from app.services.scheduled_agent_status import correction_outcome
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_agents_v2_ui_is_compact_and_has_detail_drawer_and_flow() -> None:
-    script = (ROOT / "app" / "ui" / "agents-v2.js").read_text(encoding="utf-8")
+def test_agents_v3_ui_is_compact_and_loads_details_lazily() -> None:
+    script = (ROOT / "app" / "ui" / "agents-v3.js").read_text(encoding="utf-8")
     style = (ROOT / "app" / "ui" / "agents-v2.css").read_text(encoding="utf-8")
     web = (ROOT / "app" / "web_fast_validation.py").read_text(encoding="utf-8")
     cache = (ROOT / "app" / "web_ui_cache.py").read_text(encoding="utf-8")
 
     assert "Agentes IA" in script
-    assert 'data-view = "agents"' not in script
     assert 'dataset.view = "agents"' in script
     assert 'dataset.view = "agentflow"' in script
     assert "Fluxo dos Agentes IA" in script
-    assert "topbar-agent-flow" in script
     assert "+ Criar Agente" in script
     assert "agent-v2-grid" in script
     assert "agent-v2-drawer" in script
-    assert "Últimas 5 execuções concluídas" in script
+    assert 'requestJson("/ui/api/agents?compact=1")' in script
+    assert 'event.target.closest(".agent-v2-card[data-agent-id]")' in script
+    assert "data-agent-log-body" in script
+    assert "hydrateLog(details)" in script
     assert "Ações realizadas" in script
     assert "Erro detalhado" in script
     assert "Ação recomendada" in script
     assert "agent-v2-card" in style
     assert "agent-v2-drawer" in style
     assert "agent-v2-flow-step" in style
-    assert '"agents-v2.js"' in web
+    assert '"agents-v3.js"' in web
     assert '"agents-v2.css"' in web
-    assert 'agents-v2.js?v={_ASSET_VERSION}' in cache
+    assert 'agents-v3.js?v={_ASSET_VERSION}' in cache
     assert 'agents-v2.css?v={_ASSET_VERSION}' in cache
 
 
@@ -82,7 +83,7 @@ def test_agent_run_details_are_persistent_and_redacted() -> None:
 
 
 def test_play_activates_agent_and_stop_only_pauses_future_cycles() -> None:
-    script = (ROOT / "app" / "ui" / "agents-v2.js").read_text(encoding="utf-8")
+    script = (ROOT / "app" / "ui" / "agents-v3.js").read_text(encoding="utf-8")
     web = (ROOT / "app" / "web_agents.py").read_text(encoding="utf-8")
 
     assert '/ui/api/agents/${encodeURIComponent(agentId)}/start' in script
@@ -95,13 +96,13 @@ def test_play_activates_agent_and_stop_only_pauses_future_cycles() -> None:
 
 
 def test_ui_refreshes_runtime_state_started_by_scheduler() -> None:
-    script = (ROOT / "app" / "ui" / "agents-v2.js").read_text(encoding="utf-8")
+    script = (ROOT / "app" / "ui" / "agents-v3.js").read_text(encoding="utf-8")
     presenter = (ROOT / "app" / "services" / "scheduled_agent_presenter.py").read_text(encoding="utf-8")
 
     assert "current_execution" in script
     assert "scheduleRefresh" in script
-    assert "1400" in script
-    assert "4500" in script
+    assert "1600" in script
+    assert "5000" in script
     assert "get_job" in presenter
     assert '"percent"' in presenter
     assert '"stage"' in presenter
@@ -109,7 +110,7 @@ def test_ui_refreshes_runtime_state_started_by_scheduler() -> None:
 
 
 def test_agents_keep_corrective_actions_under_existing_approval_policy() -> None:
-    script = (ROOT / "app" / "ui" / "agents-v2.js").read_text(encoding="utf-8")
+    script = (ROOT / "app" / "ui" / "agents-v3.js").read_text(encoding="utf-8")
     registry = (ROOT / "app" / "services" / "scheduled_agent_registry.py").read_text(encoding="utf-8")
     runner = (ROOT / "app" / "services" / "custom_skill_runner.py").read_text(encoding="utf-8")
 
