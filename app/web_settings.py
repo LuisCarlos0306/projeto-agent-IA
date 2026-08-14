@@ -23,7 +23,11 @@ from app.web import InvestigationPayload, _require_access, _require_mutation
 
 router = APIRouter(tags=["interface-settings"])
 _PROVIDER_ID = re.compile(r"^[a-z][a-z0-9_-]{1,47}$")
-_BUILTIN_IDS = {"gemini", "groq", "deepseek", "openrouter", "ollama", "omniroute"}
+_BUILTIN_IDS = {
+    "gemini", "groq", "deepseek", "openrouter", "ollama", "omniroute",
+    "mistral", "sambanova", "cloudflare", "cohere", "huggingface",
+    "cerebras", "vllm", "llamacpp",
+}
 
 
 class ProviderConfigurationPayload(BaseModel):
