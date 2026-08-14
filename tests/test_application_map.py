@@ -95,5 +95,5 @@ def test_application_map_preserves_correction_guardrails() -> None:
     assert "Segunda IA / Revisão" in service
     assert "Pós-validação" in service
     assert "known_hosts / SSH trust" in service
-    assert "action_digest" in approvals
+    assert "actions_digest" in approvals
     assert "environment_allows_correction" in execution
