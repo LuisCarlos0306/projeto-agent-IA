@@ -1,5 +1,6 @@
 (() => {
   const safeText = (value) => String(value ?? "").trim();
+  let observerScheduled = false;
 
   async function requestJson(path, options = {}) {
     const init = { ...options, headers: { ...(options.headers || {}) } };
@@ -33,11 +34,28 @@
   function ensureApprovalButton() {
     const drawer = document.querySelector("#agent-detail");
     if (!drawer || drawer.hidden) return;
-    drawer.querySelector("[data-approve-agent-correction]")?.remove();
-    if (!hasPendingCorrection(drawer)) return;
+
+    const existing = drawer.querySelector("[data-approve-agent-correction]");
+    if (!hasPendingCorrection(drawer)) {
+      if (existing) existing.remove();
+      return;
+    }
+
     const agentId = agentIdFromDrawer(drawer);
     const actions = drawer.querySelector(".agent-v2-actions");
     if (!agentId || !actions) return;
+
+    // Idempotência é obrigatória aqui: o próprio MutationObserver observa o drawer.
+    // Recriar o botão em toda mutação causava um ciclo remove -> append -> observer
+    // que bloqueava a thread principal do navegador ao abrir um agente com correção pendente.
+    if (
+      existing
+      && existing.dataset.approveAgentCorrection === agentId
+      && existing.parentElement === actions
+    ) {
+      return;
+    }
+    if (existing) existing.remove();
 
     const button = document.createElement("button");
     button.type = "button";
@@ -46,6 +64,15 @@
     button.innerHTML = "✓ <span>Aprovar correção</span>";
     button.title = "Revisar a ação exata, validar pela segunda IA e executar somente após sua confirmação";
     actions.appendChild(button);
+  }
+
+  function scheduleApprovalButtonRefresh() {
+    if (observerScheduled) return;
+    observerScheduled = true;
+    queueMicrotask(() => {
+      observerScheduled = false;
+      ensureApprovalButton();
+    });
   }
 
   async function approve(agentId, button) {
@@ -89,7 +116,7 @@
     void approve(button.dataset.approveAgentCorrection, button);
   }, true);
 
-  const observer = new MutationObserver(() => ensureApprovalButton());
+  const observer = new MutationObserver(scheduleApprovalButtonRefresh);
   document.addEventListener("DOMContentLoaded", () => {
     const drawer = document.querySelector("#agent-detail");
     if (drawer) observer.observe(drawer, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
